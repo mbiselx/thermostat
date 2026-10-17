@@ -47,6 +47,7 @@ schematic.
 ```text
 goto <deg>        move to absolute valve angle
 move <deg>        move relative to current angle
+spin <deg/s>      turn continuously (negative to close) until stop
 zero              call the current angle 0
 stop              decelerate and stop
 current <mA>      run current, RMS
@@ -59,6 +60,12 @@ status
 ```
 
 Runtime changes are not saved; copy values that work into `config.h`.
+
+### Torque test build
+
+`pio run -e torque-test -t upload` flashes a build that starts spinning at
+45 deg/s as soon as the driver answers, with no serial console needed. Flash
+the default env again (`pio run -t upload`) to go back.
 
 ### Tuning on the valve
 

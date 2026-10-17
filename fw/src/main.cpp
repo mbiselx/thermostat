@@ -49,7 +49,11 @@ Settings settings = {
 };
 
 bool moving = false;
+bool boot_spin_pending = config::SPIN_ON_BOOT_DEG_S != 0;
 uint32_t last_driver_poll = 0;
+
+// Far enough to never arrive: ~3.6 days at 1000 deg/s with 16 microsteps.
+constexpr long SPIN_STEPS = 1000000000L;
 
 // Debounced limit switch input. Only reported for now; motion does not stop
 // on it until the switches are fitted.
@@ -156,6 +160,13 @@ void startMove(long target_steps) {
   moving = true;
 }
 
+// Turn continuously at deg_s (negative closes) until `stop`.
+void startSpin(float deg_s) {
+  settings.max_speed_deg_s = fabsf(deg_s);
+  applyMotion();
+  startMove(stepper.currentPosition() + (deg_s > 0 ? SPIN_STEPS : -SPIN_STEPS));
+}
+
 void updateMotion() {
   stepper.run();
   if (moving && stepper.distanceToGo() == 0) {
@@ -197,6 +208,7 @@ void printHelp() {
       "  goto <deg>        move to absolute valve angle\n"
       "  move <deg>        move relative to current angle\n"
       "  zero              call the current angle 0\n"
+      "  spin <deg/s>      turn continuously (negative to close) until stop\n"
       "  stop              decelerate and stop\n"
       "  current <mA>      run current, RMS (100 to " +
       String(config::MAX_RUN_CURRENT_MA) +
@@ -248,6 +260,8 @@ void handleCommand(char *line) {
     startMove(degToSteps(value));
   } else if (!strcmp(cmd, "move") && parseFloat(arg, value)) {
     startMove(stepper.targetPosition() + degToSteps(value));
+  } else if (!strcmp(cmd, "spin") && parseFloat(arg, value) && value != 0) {
+    startSpin(value);
   } else if (!strcmp(cmd, "zero")) {
     stepper.setCurrentPosition(0);
   } else if (!strcmp(cmd, "stop")) {
@@ -333,6 +347,13 @@ void loop() {
   updateMotion();
   updateLimits();
   readConsole();
+
+  if (boot_spin_pending && driver != nullptr) {
+    boot_spin_pending = false;
+    Serial.printf("Spinning at %.1f deg/s (SPIN_ON_BOOT_DEG_S), send stop to end\n",
+                  config::SPIN_ON_BOOT_DEG_S);
+    startSpin(config::SPIN_ON_BOOT_DEG_S);
+  }
 
   // UART register access blocks for a few ms, so only poll between moves.
   if (!moving && millis() - last_driver_poll >= DRIVER_POLL_MS) {

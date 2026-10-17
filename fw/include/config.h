@@ -52,4 +52,12 @@ constexpr bool USE_SPREADCYCLE = true;
 // this keeps the board and motor cool when idle.
 constexpr bool DISABLE_WHEN_IDLE = true;
 
+// Spin continuously from boot at this speed (valve deg/s, negative closes),
+// without needing the serial console. 0 = off. The torque-test env sets it
+// with -DSPIN_ON_BOOT=<deg/s>.
+#ifndef SPIN_ON_BOOT
+#define SPIN_ON_BOOT 0
+#endif
+constexpr float SPIN_ON_BOOT_DEG_S = SPIN_ON_BOOT;
+
 }  // namespace config
