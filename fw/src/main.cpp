@@ -51,6 +51,22 @@ Settings settings = {
 bool moving = false;
 uint32_t last_driver_poll = 0;
 
+// Debounced limit switch input. Only reported for now; motion does not stop
+// on it until the switches are fitted.
+struct LimitSwitch {
+  const char *name;
+  uint8_t pin;
+  bool tripped;
+  bool raw;
+  uint32_t raw_since;
+};
+
+LimitSwitch limits[] = {
+    {"limit 1", pins::LIMIT_1, false, false, 0},
+    {"limit 2", pins::LIMIT_2, false, false, 0},
+};
+constexpr uint32_t LIMIT_DEBOUNCE_MS = 20;
+
 constexpr float stepsPerDeg() {
   return config::FULL_STEPS_PER_REV * config::MICROSTEPS * config::GEAR_RATIO / 360.0f;
 }
@@ -149,6 +165,30 @@ void updateMotion() {
   }
 }
 
+// --- Limit switches ---------------------------------------------------------
+
+void initLimits() {
+  for (auto &l : limits) {
+    pinMode(l.pin, INPUT);
+    l.raw = l.tripped = digitalRead(l.pin) == HIGH;
+    l.raw_since = millis();
+  }
+  pinMode(pins::P1_SPARE, INPUT);
+}
+
+void updateLimits() {
+  for (auto &l : limits) {
+    bool raw = digitalRead(l.pin) == HIGH;
+    if (raw != l.raw) {
+      l.raw = raw;
+      l.raw_since = millis();
+    } else if (raw != l.tripped && millis() - l.raw_since >= LIMIT_DEBOUNCE_MS) {
+      l.tripped = raw;
+      Serial.printf("%s %s\n", l.name, l.tripped ? "open (at limit or wire broken)" : "closed");
+    }
+  }
+}
+
 // --- Console ----------------------------------------------------------------
 
 void printHelp() {
@@ -178,6 +218,8 @@ void printStatus() {
                 settings.max_speed_deg_s, settings.accel_deg_s2);
   Serial.printf("mode %s, idle %s\n", settings.spreadcycle ? "spreadCycle" : "stealthChop",
                 settings.disable_when_idle ? "off" : "hold");
+  Serial.printf("%s %s, %s %s\n", limits[0].name, limits[0].tripped ? "open" : "closed",
+                limits[1].name, limits[1].tripped ? "open" : "closed");
   if (driver == nullptr) {
     Serial.println("driver: not found");
     return;
@@ -269,6 +311,8 @@ void setup() {
   pinMode(pins::TMC_SPREAD, OUTPUT);
   digitalWrite(pins::TMC_SPREAD, LOW);
 
+  initLimits();
+
   Serial.begin(115200);
   TmcSerial.begin(config::TMC_UART_BAUD, SERIAL_8N1, pins::TMC_UART_RX, pins::TMC_UART_TX);
   delay(100);
@@ -287,6 +331,7 @@ void setup() {
 
 void loop() {
   updateMotion();
+  updateLimits();
   readConsole();
 
   // UART register access blocks for a few ms, so only poll between moves.

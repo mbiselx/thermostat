@@ -19,6 +19,14 @@ constexpr uint8_t TMC_SPREAD = 4;   // high inverts GCONF.en_spreadcycle; we kee
 constexpr uint8_t TMC_UART_RX = 26;
 constexpr uint8_t TMC_UART_TX = 27;
 
+// Limit switches on the P1 header (MOSFET build, 2k pull-ups on board).
+// Normally-closed to GND: LOW = in travel, HIGH = at limit or wire broken.
+// Inputs only: a closed switch would short an output driven high.
+// See hw/limit-switches.md.
+constexpr uint8_t LIMIT_1 = 33;  // P1 "EN"
+constexpr uint8_t LIMIT_2 = 32;  // P1 "DIR"
+constexpr uint8_t P1_SPARE = 25; // P1 "STP"
+
 // MT6816 magnetic encoder (SPI), not used yet
 constexpr uint8_t ENC_CS   = 15;
 constexpr uint8_t ENC_SCLK = 14;

@@ -75,5 +75,8 @@ Runtime changes are not saved; copy values that work into `config.h`.
   picks the mode in software. LilyGO's factory example drives it high.
 - DIAG only drives an LED, not an ESP32 pin, so stall detection would have to
   poll `SG_RESULT` over UART.
+- Limit switches on P1 (GPIO33 and GPIO32, see `hw/limit-switches.md`) are
+  read as inputs only, debounced, and shown in `status`. Motion doesn't stop on
+  them yet, so the firmware still works before the switches are fitted.
 - The MT6816 encoder, OLED header and buttons are wired up in `pins.h` but not
   used yet.
