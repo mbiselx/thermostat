@@ -17,6 +17,7 @@ thermostat/
 ├── hw/         # hardware related files 
 |  ├── cad/ 
 |  ├── datasheets/ 
-|  └── BOM.md
+|  ├── BOM.md
+|  └── limit-switches.md  # limit switch wiring on the T-Motor P1 header
 └── sw/         # home assistant integration 
 ```         
