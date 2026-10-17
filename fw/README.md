@@ -64,7 +64,8 @@ Runtime changes are not saved; copy values that work into `config.h`.
 ### Torque test build
 
 `pio run -e torque-test -t upload` flashes a build that starts spinning at
-45 deg/s as soon as the driver answers, with no serial console needed. Flash
+30 deg/s and 1600 mA as soon as the driver answers, with no serial console
+needed. The driver hits its 120 °C warning after ~15 s at that current. Flash
 the default env again (`pio run -t upload`) to go back.
 
 ### Tuning on the valve

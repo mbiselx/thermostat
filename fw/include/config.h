@@ -38,7 +38,11 @@ constexpr bool INVERT_DIRECTION = false;
 
 // Stepper torque falls off with speed, so a stiff valve wants high current,
 // low speed and gentle acceleration.
-constexpr uint16_t RUN_CURRENT_MA = 1000;
+// RUN_CURRENT can be overridden per build env (see torque-test).
+#ifndef RUN_CURRENT
+#define RUN_CURRENT 1000
+#endif
+constexpr uint16_t RUN_CURRENT_MA = RUN_CURRENT;
 constexpr float HOLD_CURRENT_FRACTION = 0.3f;  // of run current, while enabled
 
 constexpr float MAX_SPEED_DEG_S = 90.0f;   // valve degrees per second
