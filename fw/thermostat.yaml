@@ -1,0 +1,129 @@
+# Radiator valve actuator: LilyGO TTGO T-Motor (ESP32 + TMC2209) and a NEMA17.
+# Pin map from LilyGO's README and schematic (github.com/Xinyuan-LilyGO/T-Motor).
+
+substitutions:
+  name: thermostat
+  friendly_name: Thermostat
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: pico32
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  # Don't reboot when Home Assistant is unreachable; the valve should keep
+  # working on its own through an outage.
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+    encryption:  # reuses the api key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ${friendly_name} Fallback
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+# TMC2209 single-wire UART on PDN_UART.
+uart:
+  id: tmc_uart
+  tx_pin: GPIO27  # through the board's 1 kOhm to PDN_UART
+  rx_pin: GPIO26
+  baud_rate: 115200
+
+valve:
+  - platform: valve_actuator
+    id: radiator_valve
+    name: Radiator valve
+    uart_id: tmc_uart
+    step_pin: GPIO23
+    dir_pin: GPIO18
+    enable_pin:
+      number: GPIO2
+      inverted: true  # ENN is active low
+      ignore_strapping_warning: true
+    clk_pin: GPIO19     # held low: internal clock
+    spread_pin: GPIO4   # held low: chopper mode set by spread_cycle below
+    sense_resistor: 0.12 ohm  # R7/R8 on the T-Motor
+    run_current: 1.0 A
+    hold_current: 30%
+    microsteps: 16
+    gear_ratio: 1.0     # motor turns per valve turn; update once the gearbox is built
+    travel: 360°        # valve rotation from closed to open; measure it on the valve
+    max_speed: 90       # valve degrees per second
+    acceleration: 180   # valve degrees per second squared
+    spread_cycle: true  # more torque than StealthChop under load
+    hold_when_idle: false  # the valve's friction holds it; keeps the driver cool
+    # Uncomment once the limit switches are fitted (see binary_sensor below).
+    # open_limit: open_limit
+    # closed_limit: closed_limit
+
+binary_sensor:
+  # Board buttons (external pull-ups, pressed = low): close, half, open.
+  - platform: gpio
+    id: button_close
+    pin:
+      number: GPIO36  # NEXT
+      inverted: true
+    filters:
+      - delayed_on: 20ms
+    on_press:
+      - valve.control:
+          id: radiator_valve
+          position: 0%
+  - platform: gpio
+    id: button_half
+    pin:
+      number: GPIO34  # ENTER
+      inverted: true
+    filters:
+      - delayed_on: 20ms
+    on_press:
+      - valve.control:
+          id: radiator_valve
+          position: 50%
+  - platform: gpio
+    id: button_open
+    pin:
+      number: GPIO35  # MENU
+      inverted: true
+    filters:
+      - delayed_on: 20ms
+    on_press:
+      - valve.control:
+          id: radiator_valve
+          position: 100%
+
+  # Limit switches on P1 (hw/limit-switches.md). Normally closed to GND with the
+  # board's 2k pull-ups, so ON (high) means at the limit or a broken wire. These
+  # pins must stay inputs. Uncomment once fitted; until then they read ON and
+  # would block all motion.
+  # - platform: gpio
+  #   id: open_limit
+  #   name: Open limit
+  #   pin: GPIO33  # P1 "EN"
+  #   filters:
+  #     - delayed_on_off: 20ms
+  # - platform: gpio
+  #   id: closed_limit
+  #   name: Closed limit
+  #   pin: GPIO32  # P1 "DIR"
+  #   filters:
+  #     - delayed_on_off: 20ms
