@@ -30,6 +30,8 @@ static constexpr uint32_t CHOPCONF_VSENSE = 1 << 17;
 static constexpr uint32_t PWMCONF_DEFAULT = 0xC10D0024;
 static constexpr uint32_t TPOWERDOWN_DEFAULT = 20;  // ~0.3 s from standstill to hold current
 static constexpr uint32_t IHOLDDELAY = 1;
+// StallGuard runs at every speed; SG_RESULT is polled, DIAG isn't wired to the ESP32.
+static constexpr uint32_t TCOOLTHRS_MAX = 0xFFFFF;
 
 // Full-scale sense voltage with vsense=0 and vsense=1 (datasheet, 0.325 V / 0.180 V).
 static constexpr float VFS_LOW_SENSE = 0.325f;
@@ -68,6 +70,7 @@ void TMC2209::write(uint8_t reg, uint32_t value) {
                       static_cast<uint8_t>(value),
                       0};
   frame[7] = crc8(frame, 7);
+  this->pending_ = false;  // a pending reply would be lost in the drain
   this->drain_();
   this->uart_->write_array(frame, sizeof(frame));
   this->uart_->flush();
@@ -76,33 +79,54 @@ void TMC2209::write(uint8_t reg, uint32_t value) {
   this->drain_();
 }
 
-bool TMC2209::read(uint8_t reg, uint32_t *value) {
-  uint8_t request[4] = {SYNC, this->address_, reg, 0};
-  request[3] = crc8(request, 3);
+void TMC2209::request(uint8_t reg) {
+  uint8_t frame[4] = {SYNC, this->address_, reg, 0};
+  frame[3] = crc8(frame, 3);
   this->drain_();
-  this->uart_->write_array(request, sizeof(request));
-  this->uart_->flush();
+  this->uart_->write_array(frame, sizeof(frame));  // 4 bytes fit the TX FIFO, so this doesn't wait
+  this->pending_ = true;
+  this->pending_reg_ = reg;
+  this->pending_len_ = 0;
+  this->pending_since_us_ = micros();
+}
 
+TMC2209::Reply TMC2209::poll_reply(uint32_t *value) {
+  if (!this->pending_)
+    return Reply::NONE;
   // The 4-byte echo of the request comes back first, then the 8-byte reply.
   // Scan for the reply instead of counting on the echo.
-  uint8_t buf[16];
-  size_t len = 0;
-  uint32_t start = micros();
-  while (micros() - start < REPLY_TIMEOUT_US && len < sizeof(buf)) {
-    if (this->uart_->available() == 0) {
-      delayMicroseconds(50);
+  while (this->uart_->available() > 0 && this->pending_len_ < sizeof(this->pending_buf_)) {
+    this->uart_->read_byte(&this->pending_buf_[this->pending_len_++]);
+    if (this->pending_len_ < 8)
       continue;
-    }
-    this->uart_->read_byte(&buf[len++]);
-    if (len < 8)
-      continue;
-    const uint8_t *frame = &buf[len - 8];
-    if (frame[0] == SYNC && frame[1] == MASTER_ADDRESS && frame[2] == reg && crc8(frame, 7) == frame[7]) {
+    const uint8_t *frame = &this->pending_buf_[this->pending_len_ - 8];
+    if (frame[0] == SYNC && frame[1] == MASTER_ADDRESS && frame[2] == this->pending_reg_ &&
+        crc8(frame, 7) == frame[7]) {
       *value = (uint32_t(frame[3]) << 24) | (uint32_t(frame[4]) << 16) | (uint32_t(frame[5]) << 8) | frame[6];
-      return true;
+      this->pending_ = false;
+      return Reply::OK;
     }
   }
-  return false;
+  if (this->pending_len_ >= sizeof(this->pending_buf_) || micros() - this->pending_since_us_ > REPLY_TIMEOUT_US) {
+    this->pending_ = false;
+    return Reply::FAILED;
+  }
+  return Reply::WAITING;
+}
+
+bool TMC2209::read(uint8_t reg, uint32_t *value) {
+  this->request(reg);
+  while (true) {
+    switch (this->poll_reply(value)) {
+      case Reply::WAITING:
+        delayMicroseconds(50);
+        break;
+      case Reply::OK:
+        return true;
+      default:
+        return false;
+    }
+  }
 }
 
 bool TMC2209::responds() {
@@ -132,6 +156,14 @@ float TMC2209::set_current(float sense_resistor, float run_current, float hold_f
   return this->actual_current_;
 }
 
+void TMC2209::set_spread_cycle(bool spread_cycle) {
+  uint32_t gconf = spread_cycle ? (this->gconf_ | GCONF_EN_SPREADCYCLE) : (this->gconf_ & ~GCONF_EN_SPREADCYCLE);
+  if (gconf == this->gconf_)
+    return;
+  this->gconf_ = gconf;
+  this->write(REG_GCONF, gconf);
+}
+
 bool TMC2209::configure(const Settings &settings) {
   this->write(REG_GSTAT, GSTAT_RESET | GSTAT_DRV_ERR | 0b100);  // clear latched flags
 
@@ -140,6 +172,7 @@ bool TMC2209::configure(const Settings &settings) {
     gconf |= GCONF_EN_SPREADCYCLE;
   if (settings.invert_direction)
     gconf |= GCONF_SHAFT;
+  this->gconf_ = gconf;
   this->write(REG_GCONF, gconf);
 
   // MRES: 0 = 256 microsteps ... 8 = full steps.
@@ -150,6 +183,7 @@ bool TMC2209::configure(const Settings &settings) {
   this->write(REG_CHOPCONF, this->chopconf_);
   this->write(REG_PWMCONF, PWMCONF_DEFAULT);
   this->write(REG_TPOWERDOWN, TPOWERDOWN_DEFAULT);
+  this->write(REG_TCOOLTHRS, TCOOLTHRS_MAX);
   this->set_current(settings.sense_resistor, settings.run_current, settings.hold_fraction);
 
   uint32_t readback;
