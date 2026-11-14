@@ -65,7 +65,7 @@ valve:
     run_current: 1.0 A
     hold_current: 30%
     microsteps: 16
-    gear_ratio: 3.933   # motor turns per valve turn: 59/15 gears; confirm on the prototype
+    gear_ratio: 3.933   # motor turns per valve turn: the 59/15 herringbone gears
     # travel: is measured by calibration. Set it here to skip finding the open end.
     max_speed: 90       # valve degrees per second
     acceleration: 180   # valve degrees per second squared
@@ -78,7 +78,7 @@ valve:
       on_boot: true
       speed: 45             # valve degrees per second while searching
       stall_threshold: 50%  # stall = StallGuard below this share of its free-running value
-      max_travel: 1080°     # give up searching after this much rotation
+      max_travel: 480°      # give up searching after this much rotation (travel is ~375°)
       backoff: 5°           # move off the closed end stop after finding it
     stallguard:
       name: StallGuard
