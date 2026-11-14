@@ -65,15 +65,67 @@ valve:
     run_current: 1.0 A
     hold_current: 30%
     microsteps: 16
-    gear_ratio: 1.0     # motor turns per valve turn; update once the gearbox is built
-    travel: 360°        # valve rotation from closed to open; measure it on the valve
+    gear_ratio: 3.933   # motor turns per valve turn: 59/15 gears; confirm on the prototype
+    # travel: is measured by calibration. Set it here to skip finding the open end.
     max_speed: 90       # valve degrees per second
     acceleration: 180   # valve degrees per second squared
-    spread_cycle: true  # more torque than StealthChop under load
+    spread_cycle: true  # more torque than StealthChop under load (calibration always uses StealthChop)
     hold_when_idle: false  # the valve's friction holds it; keeps the driver cool
-    # Uncomment once the limit switches are fitted (see binary_sensor below).
-    # open_limit: open_limit
-    # closed_limit: closed_limit
+    # Find the end stops by stalling into them, at boot and on the Calibrate
+    # button. The Stall threshold and Calibration speed sliders below take over
+    # speed and stall_threshold at runtime; they start at the same values.
+    homing:
+      on_boot: true
+      speed: 45             # valve degrees per second while searching
+      stall_threshold: 50%  # stall = StallGuard below this share of its free-running value
+      max_travel: 1080°     # give up searching after this much rotation
+      backoff: 5°           # move off the closed end stop after finding it
+    stallguard:
+      name: StallGuard
+    measured_travel:
+      name: Valve travel
+    status:
+      name: Valve status
+
+button:
+  - platform: template
+    name: Calibrate valve
+    icon: mdi:arrow-expand-horizontal
+    entity_category: config
+    on_press:
+      - lambda: id(radiator_valve).calibrate();
+  - platform: restart
+    name: Restart
+    entity_category: config
+
+# Calibration tuning from Home Assistant, kept across reboots.
+number:
+  - platform: template
+    name: Stall threshold
+    icon: mdi:car-brake-alert
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 10
+    max_value: 90
+    step: 5
+    initial_value: 50
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(radiator_valve).set_stall_threshold(x / 100.0f);
+  - platform: template
+    name: Calibration speed
+    icon: mdi:speedometer-slow
+    entity_category: config
+    unit_of_measurement: °/s
+    min_value: 5
+    max_value: 90
+    step: 5
+    initial_value: 45
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(radiator_valve).set_homing_speed(x);
 
 binary_sensor:
   # Board buttons (external pull-ups, pressed = low): close, half, open.
@@ -110,20 +162,3 @@ binary_sensor:
       - valve.control:
           id: radiator_valve
           position: 100%
-
-  # Limit switches on P1 (hw/limit-switches.md). Normally closed to GND with the
-  # board's 2k pull-ups, so ON (high) means at the limit or a broken wire. These
-  # pins must stay inputs. Uncomment once fitted; until then they read ON and
-  # would block all motion.
-  # - platform: gpio
-  #   id: open_limit
-  #   name: Open limit
-  #   pin: GPIO33  # P1 "EN"
-  #   filters:
-  #     - delayed_on_off: 20ms
-  # - platform: gpio
-  #   id: closed_limit
-  #   name: Closed limit
-  #   pin: GPIO32  # P1 "DIR"
-  #   filters:
-  #     - delayed_on_off: 20ms
