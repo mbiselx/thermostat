@@ -951,8 +951,14 @@ void ValveActuator::check_encoder_after_move_() {
   }
   int32_t error = this->position_ - this->encoder_position_();
   if (std::abs(error) > LOST_STEP_FULL_STEPS * this->settings_.microsteps) {
-    ESP_LOGW(TAG, "Motor lost %.1f deg of valve travel on that move; taking the encoder's position",
-             error / this->steps_per_deg_);
+    float lost_deg = std::abs(error) / this->steps_per_deg_;
+    if (ran_free) {
+      ESP_LOGW(TAG, "Motor lost %.1f deg of valve travel on that move; taking the encoder's position", lost_deg);
+    } else {
+      // A seek that stalled at the end stop: the steps sent after the stall
+      // never turned the motor.
+      ESP_LOGD(TAG, "Motor stopped %.1f deg short of the steps sent; taking the encoder's position", lost_deg);
+    }
     this->position_ = this->target_ = this->encoder_position_();
   }
   this->sync_encoder_();
