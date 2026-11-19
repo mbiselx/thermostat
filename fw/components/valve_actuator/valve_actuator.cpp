@@ -280,26 +280,37 @@ valve::ValveTraits ValveActuator::get_traits() {
 }
 
 void ValveActuator::control(const valve::ValveCall &call) {
-  bool calibrating = this->calibration_requested_ || this->homing_ != Homing::IDLE;
   if (call.get_stop()) {
-    if (calibrating) {
+    if (this->calibration_requested_ || this->homing_ != Homing::IDLE) {
       ESP_LOGI(TAG, "Calibration cancelled");
       this->calibration_requested_ = false;
       this->abort_calibration_();
     }
     this->stop_();
+    this->manual_move_callbacks_.call();
     return;
   }
   auto position = call.get_position();
   if (!position.has_value())
     return;
-  float fraction = std::clamp(*position, 0.0f, 1.0f);
-  if (calibrating) {
+  this->manual_move_callbacks_.call();
+  this->move_to_fraction(*position);
+}
+
+void ValveActuator::move_to_fraction(float fraction) {
+  fraction = std::clamp(fraction, 0.0f, 1.0f);
+  if (this->calibration_requested_ || this->homing_ != Homing::IDLE) {
     ESP_LOGD(TAG, "Moving to %.0f%% once calibrated", fraction * 100);
     this->resume_position_ = fraction;
     return;
   }
   this->move_to_(static_cast<int32_t>(lroundf(fraction * this->travel_steps_)));
+}
+
+float ValveActuator::target_fraction() const {
+  if ((this->calibration_requested_ || this->homing_ != Homing::IDLE) && this->resume_position_.has_value())
+    return *this->resume_position_;
+  return std::clamp(float(this->target_) / this->travel_steps_, 0.0f, 1.0f);
 }
 
 // --- Buttons -------------------------------------------------------------------
@@ -363,6 +374,7 @@ void ValveActuator::jog(float degrees) {
     ESP_LOGW(TAG, "Not jogging during calibration");
     return;
   }
+  this->manual_move_callbacks_.call();
   int32_t from = this->moving_ ? this->target_ : this->position_;
   this->move_to_(from + static_cast<int32_t>(lroundf(degrees * this->steps_per_deg_)));
 }

@@ -2,14 +2,16 @@
 
 ESPHome firmware for the valve actuator: a NEMA17 driven by the TMC2209 on a
 [LilyGO TTGO T-Motor](https://github.com/Xinyuan-LilyGO/T-Motor). Home
-Assistant sees it as a valve with a position (0 % closed, 100 % open).
+Assistant sees it as a thermostat (a climate entity, with Home, Sleep and Away
+presets) and as a valve with a position (0 % closed, 100 % open).
 
 - [`thermostat.yaml`](thermostat.yaml): the device config (Wi-Fi, API, OTA,
   buttons, calibration and its tuning controls).
 - [`components/valve_actuator/`](components/valve_actuator/): a custom C++
   ESPHome component. It configures the TMC2209 over UART, generates STEP/DIR
   with an acceleration ramp, finds the end stops by stall detection, and
-  remembers the position across reboots.
+  remembers the position across reboots. Its climate platform is the
+  thermostat.
 
 The PlatformIO bring-up and torque-test firmware lives on the `torque-test`
 branch.
@@ -38,6 +40,11 @@ Add the device under Settings > Devices & services > ESPHome (it is usually
 discovered on its own) and paste `api_encryption_key` from `secrets.yaml` when
 asked. It shows up as:
 
+- **Radiator**: the thermostat. Off or heat, a target temperature, and the
+  Home, Sleep and Away presets. See [Thermostat](#thermostat).
+- **Valve held by hand**: on while a direct valve command holds off the
+  thermostat.
+- **Thermostat P gain**, **Thermostat I gain**: tuning.
 - **Radiator valve**: a valve with a position, 0 % closed to 100 % open.
 - **Calibrate valve**: finds the closed end again by driving into it.
 - **Set closed here**, **Set open here**: the valve is at that end right now
@@ -145,6 +152,47 @@ at that moment. At boot:
   and raises **Valve needs attention**. Set the valve where you want it and
   press **Dismiss alert**.
 
+## Thermostat
+
+The climate platform sets the valve from the room temperature. It reads the
+temperature from a Home Assistant sensor, `room_temperature_sensor` at the top
+of `thermostat.yaml` (the Hub 3 in the room by default). Any temperature sensor
+in Home Assistant works, such as a Bluetooth meter or a "Combine the state of
+several sensors" helper averaging a few: put its entity ID there and reflash.
+
+It's a PI controller, built to move the valve as little as possible:
+
+- It runs once a minute (`update_interval`), and right away when the target,
+  preset or mode changes.
+- The valve opens 20 % per degree below the target (P gain), plus an integral
+  that learns where the valve has to sit to hold the target: it grows 5 % per
+  degree-hour below the target (I gain), but only while the room is more than
+  0.2 °C (`deadband`) off.
+- The valve only moves when the result is at least 5 % (`min_step`) from where
+  it is, or to close fully. So noise of a tenth of a degree never moves it.
+- The integral is saved, so a reboot or power cut picks up where it was.
+
+**Presets.** Home 23.5 °C, Sleep 20.5 °C and Away 18.5 °C. Choosing Sleep or
+Away starts the valve where it usually holds that temperature (25 % and 5 %).
+Setting a temperature by hand clears the preset; it holds until something sets
+a preset or temperature again (a schedule, for instance).
+
+**Off** closes the valve.
+
+**Manual override.** Moving the valve directly holds it there, and **Valve held
+by hand** turns on: the Home Assistant valve entity, the board buttons, the jog
+buttons and automations that set the valve all count. The thermostat takes over
+again at the next change to its mode, target or preset. So an automation that
+pauses heating should turn the thermostat off and back on rather than set the
+valve; then a power cut during the pause also keeps it off.
+
+If Home Assistant or the sensor is unavailable, the valve stays where it is.
+
+**Tuning.** The log prints each step at debug level ("Room 20.3, target 20.5:
+valve 27% (P +4%, I 23%)"). If the room overshoots after a preset change, lower
+the I gain. If it takes hours to settle, raise it. If the valve moves too often,
+lower the P gain or raise `min_step`.
+
 ## Configuration
 
 All motion settings are in valve degrees, after the gearbox:
@@ -174,6 +222,23 @@ All motion settings are in valve degrees, after the gearbox:
 | `alert` | none | Binary sensor raised after a power-cut recovery |
 | `stallguard`, `measured_travel`, `status` | none | Diagnostic sensors |
 
+The thermostat (`climate:` `platform: valve_actuator`):
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `valve_id` | the valve | |
+| `sensor` | required | Room temperature, usually a `homeassistant` sensor |
+| `humidity_sensor` | none | Shown on the thermostat card |
+| `default_target_temperature` | 21 °C | Until a target or preset is set |
+| `presets:` `home`/`sleep`/`away`/`eco`/`comfort`/`boost`/`activity` | none | Each with `target_temperature` and optionally `valve_position`, where the valve usually holds it |
+| `control:` `kp` | 20% | Valve opening per degree below target |
+| `control:` `ki` | 5% | Integral growth per degree-hour below target |
+| `control:` `deadband` | 0.2 °C | No integral change this close to the target |
+| `control:` `min_step` | 5% | Smallest valve move |
+| `control:` `max_position` | 100% | Never open the valve further than this |
+| `update_interval` | 60 s | |
+| `valve_held` | none | Binary sensor: on while a direct valve command holds off the thermostat |
+
 ## Board notes
 
 - The SPREAD pin inverts the chopper mode bit, so it's held low and the mode is
@@ -195,4 +260,5 @@ All motion settings are in valve degrees, after the gearbox:
 
 - Stall detection during normal moves (only calibration and recovery watch for
   stalls; normal moves only correct lost steps afterwards).
-- The thermostat loop and temperature sensor.
+- A temperature sensor on the board, so the thermostat keeps working without
+  Home Assistant.
