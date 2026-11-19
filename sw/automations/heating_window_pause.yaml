@@ -1,0 +1,63 @@
+# Heating: pause while a window is open
+#
+# Closes the radiator valve as soon as any studio window has been open for
+# 15 s, and puts it back where it was once every window has been closed for
+# 30 s. If someone moved the valve while the window was open (HA dashboard,
+# the A/B/C buttons on the device), that new position is kept.
+#
+# Paste into Settings > Automations & scenes > Create automation >
+# (three-dot menu) Edit in YAML.
+#
+# Window sensors are the SwitchBot BLE contact sensors (local, faster than the
+# SwitchBot Cloud duplicates). Remove the kitchen window if it should not
+# count.
+alias: Heating - pause while a window is open
+description: >-
+  Closes the radiator valve while any studio window is open and restores the
+  previous position when all windows are closed again.
+mode: single
+max_exceeded: silent
+variables:
+  valve: valve.room_thermostat_radiator_valve
+  windows:
+    - binary_sensor.contact_sensor_d562 # Large Window
+    - binary_sensor.contact_sensor_65a5 # Small Window
+    - binary_sensor.contact_sensor_4d2e # Kitchen Window
+triggers:
+  - trigger: state
+    entity_id:
+      - binary_sensor.contact_sensor_d562
+      - binary_sensor.contact_sensor_65a5
+      - binary_sensor.contact_sensor_4d2e
+    to: "on"
+    for: "00:00:15"
+conditions:
+  # Nothing to pause if the valve is already shut.
+  - condition: template
+    value_template: "{{ state_attr(valve, 'current_position') | int(0) > 0 }}"
+actions:
+  - variables:
+      position_before: "{{ state_attr(valve, 'current_position') | int }}"
+  - action: valve.set_valve_position
+    target:
+      entity_id: valve.room_thermostat_radiator_valve
+    data:
+      position: 0
+  # Wait until every window is closed and still closed 30 s later (no timeout).
+  - repeat:
+      sequence:
+        - wait_template: "{{ windows | select('is_state', 'on') | list | count == 0 }}"
+        - delay: "00:00:30"
+      until:
+        - condition: template
+          value_template: "{{ windows | select('is_state', 'on') | list | count == 0 }}"
+  # Restore only if nobody changed the valve in the meantime.
+  - if:
+      - condition: template
+        value_template: "{{ state_attr(valve, 'current_position') | int(-1) == 0 }}"
+    then:
+      - action: valve.set_valve_position
+        target:
+          entity_id: valve.room_thermostat_radiator_valve
+        data:
+          position: "{{ position_before }}"
