@@ -229,7 +229,7 @@ The thermostat (`climate:` `platform: valve_actuator`):
 | `valve_id` | the valve | |
 | `sensor` | required | Room temperature, usually a `homeassistant` sensor |
 | `humidity_sensor` | none | Shown on the thermostat card |
-| `default_target_temperature` | 21 °C | Until a target or preset is set |
+| `default_target_temperature` | 21 °C | On first boot when there is no `home` preset (otherwise it starts in Home) |
 | `presets:` `home`/`sleep`/`away`/`eco`/`comfort`/`boost`/`activity` | none | Each with `target_temperature` and optionally `valve_position`, where the valve usually holds it |
 | `control:` `kp` | 20% | Valve opening per degree below target |
 | `control:` `ki` | 5% | Integral growth per degree-hour below target |
