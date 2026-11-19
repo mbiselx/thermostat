@@ -78,7 +78,7 @@ valve:
     # Valve rotation from closed to open, a little short of the ~370° maximum so
     # 100 % doesn't slip the gear. "Set open here" replaces it.
     travel: 360°
-    max_speed: 90       # valve degrees per second
+    max_speed: 25       # valve degrees per second; faster is audible in a bedroom
     acceleration: 180   # valve degrees per second squared
     spread_cycle: false # StealthChop: quiet enough for a bedroom
     hold_when_idle: false  # the valve's friction holds it; keeps the driver cool
@@ -94,7 +94,7 @@ valve:
     # speed, current and stall_threshold at runtime.
     homing:
       on_boot: true
-      speed: 45             # valve degrees per second while searching
+      speed: 25             # valve degrees per second while searching
       current: 0.6 A        # low enough that the motor stalls before the gear slips
       stall_threshold: 50%  # StallGuard below this share of its free-running value
       max_travel: 380°      # give up searching after this much rotation (travel is <= 370°)
@@ -173,7 +173,7 @@ number:
     min_value: 5
     max_value: 90
     step: 5
-    initial_value: 45
+    initial_value: 25
     optimistic: true
     restore_value: true
     on_value:
