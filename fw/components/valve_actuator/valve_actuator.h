@@ -10,6 +10,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
 
+#include "mt6816.h"
 #include "tmc2209.h"
 
 namespace esphome::valve_actuator {
@@ -18,10 +19,13 @@ namespace esphome::valve_actuator {
 // Motion is STEP/DIR generated in loop(); the driver is configured over UART.
 // Position 0 is the closed end stop and 1 the open end, `travel` apart.
 //
-// Calibration finds the end stops without switches: it drives into each one in
-// StealthChop and watches StallGuard (SG_RESULT, the driver's load reading,
-// which drops as the load rises). A stall is SG_RESULT staying below
-// `stall_threshold` times the value measured while running free.
+// Position comes from counting steps, checked against the MT6816 encoder on
+// the motor shaft when there is one. The encoder is read all the time, so the
+// valve can also be turned by hand while the motor is unpowered.
+//
+// The closed end is found by driving into it (calibration, or recovery after a
+// power cut) and watching for the motor stalling (encoder) or the load rising
+// (StallGuard), or set by hand with set_closed_here().
 class ValveActuator : public valve::Valve, public Component, public uart::UARTDevice {
  public:
   void setup() override;
@@ -53,9 +57,12 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   void set_hold_when_idle(bool hold) { this->hold_when_idle_ = hold; }
   void set_open_limit(binary_sensor::BinarySensor *sensor) { this->open_limit_ = sensor; }
   void set_closed_limit(binary_sensor::BinarySensor *sensor) { this->closed_limit_ = sensor; }
+#ifdef USE_SPI
+  void set_encoder(MT6816 *encoder) { this->encoder_ = encoder; }
+#endif
 
-  // Calibration. The speed and threshold setters also work at runtime (from a
-  // template number); they apply from the next calibration.
+  // Calibration. The speed, current and threshold setters also work at
+  // runtime (from template numbers); they apply from the next calibration.
   void set_homing_enabled(bool enabled) { this->homing_enabled_ = enabled; }
   void set_home_on_boot(bool on_boot) { this->home_on_boot_ = on_boot; }
   void set_homing_speed(float deg_per_s) { this->homing_speed_deg_s_ = deg_per_s; }
@@ -63,23 +70,41 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   void set_stall_threshold(float fraction) { this->stall_threshold_ = fraction; }
   void set_max_travel(float degrees) { this->max_travel_deg_ = degrees; }
   void set_backoff(float degrees) { this->backoff_deg_ = degrees; }
+  void set_recovery_position(float fraction) { this->recovery_position_ = fraction; }
 
   void set_stallguard_sensor(sensor::Sensor *sensor) { this->stallguard_sensor_ = sensor; }
   void set_travel_sensor(sensor::Sensor *sensor) { this->travel_sensor_ = sensor; }
   void set_status_sensor(text_sensor::TextSensor *sensor) { this->status_sensor_ = sensor; }
+  void set_alert_sensor(binary_sensor::BinarySensor *sensor) { this->alert_sensor_ = sensor; }
 
-  // Find the end stops again, then return to the current target position.
+  // Find the closed end again (and the open end if the travel isn't known),
+  // then return to the current target position.
   void calibrate();
+  // The valve is at its closed (0 %) or open (100 %) end right now.
+  void set_closed_here();
+  void set_open_here();
+  // Move by this many valve degrees, ignoring the 0-100 % range.
+  void jog(float degrees);
+  void dismiss_alert();
   bool is_calibrated() const { return this->calibrated_; }
 
  protected:
   enum class Homing : uint8_t {
     IDLE,
-    SETTLE,          // motor powered at standstill so StealthChop can tune itself
-    RUNUP,           // move away from the closed end so the seek can measure free running
+    SETTLE,       // motor powered at standstill so StealthChop can tune itself
+    RUNUP,        // move away from the closed end so the seek can get up to speed
     SEEK_CLOSED,
-    BACKOFF,         // move off the closed end stop
-    SEEK_OPEN,       // only when `travel` isn't configured: measure it
+    BACKOFF,      // move off the closed end stop
+    SEEK_OPEN,    // only when the travel isn't known: measure it
+  };
+
+  // Saved after every move and manual turn. With an encoder, the saved angle
+  // tells at boot whether the valve moved while the power was off.
+  struct SavedState {
+    int32_t position;       // microsteps from the closed end
+    uint16_t encoder_angle;  // raw MT6816 reading
+    int8_t encoder_sign;     // encoder direction relative to steps, 0 = unknown
+    uint8_t flags;
   };
 
   void control(const valve::ValveCall &call) override;
@@ -97,6 +122,7 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   void go_idle_();
   bool limit_tripped_(int8_t direction) const;
   void publish_position_(bool save);
+  void save_state_();
 
   void start_calibration_();
   void calibration_step_();
@@ -105,12 +131,26 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   void restore_motion_settings_();
   bool seeking_() const { return this->homing_ == Homing::SEEK_CLOSED || this->homing_ == Homing::SEEK_OPEN; }
   void start_seek_(int8_t direction);
+  void end_found_at_(const char *how);
 
   void poll_stallguard_();
   void on_stallguard_(uint16_t value);
 
+  // Encoder.
+  bool read_encoder_(uint16_t *angle);
+  void poll_encoder_();
+  bool tracking_() const { return this->encoder_ok_ && this->encoder_sign_ != 0; }
+  int32_t encoder_steps_() const;     // encoder travel since boot, in microsteps
+  int32_t encoder_position_() const;  // position according to the encoder
+  void sync_encoder_();
+  void check_encoder_stall_();
+  void check_encoder_after_move_();
+  void track_manual_moves_();
+
   void set_status_(const char *status);
+  void set_alert_(bool alert);
   void set_travel_steps_(int32_t steps);
+  void save_travel_();
 
   GPIOPin *step_pin_{nullptr};
   GPIOPin *dir_pin_{nullptr};
@@ -122,6 +162,10 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   sensor::Sensor *stallguard_sensor_{nullptr};
   sensor::Sensor *travel_sensor_{nullptr};
   text_sensor::TextSensor *status_sensor_{nullptr};
+  binary_sensor::BinarySensor *alert_sensor_{nullptr};
+#ifdef USE_SPI
+  MT6816 *encoder_{nullptr};
+#endif
 
   TMC2209 driver_;
   TMC2209::Settings settings_{0.12f, 1.0f, 0.3f, 16, true, false};
@@ -133,6 +177,7 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   float gear_ratio_{1.0f};
   float travel_deg_{360.0f};
   bool travel_configured_{false};
+  bool travel_known_{false};  // configured, set by hand or measured
   float max_speed_deg_s_{90.0f};
   float accel_deg_s2_{180.0f};
   bool hold_when_idle_{false};
@@ -144,33 +189,40 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   float stall_threshold_{0.5f};
   float max_travel_deg_{1080.0f};
   float backoff_deg_{5.0f};
+  float recovery_position_{0.05f};
 
   // Derived in setup(), in microsteps.
   float steps_per_deg_{0};
+  int32_t steps_per_turn_{0};  // per motor turn
   int32_t travel_steps_{0};
   float max_speed_{0};  // steps/s
   float accel_{0};      // steps/s^2
   float min_speed_{0};  // steps/s
   ESPPreferenceObject travel_pref_;
+  ESPPreferenceObject state_pref_;
 
   // Motion.
   int32_t position_{0};
   int32_t target_{0};
-  int8_t direction_{0};  // of the last step, for DIR changes
-  float speed_{0};       // steps/s
+  int8_t direction_{0};   // of the last step, for DIR changes
+  float speed_{0};        // steps/s
   float speed_limit_{0};  // steps/s, for the current move
   bool moving_{false};
   uint32_t last_update_us_{0};
   uint32_t last_step_us_{0};
   uint32_t last_publish_ms_{0};
+  int32_t move_start_position_{0};
+  int32_t move_start_counts_{0};
   HighFrequencyLoopRequester high_freq_;
 
-  // Calibration.
+  // Calibration and recovery.
   Homing homing_{Homing::IDLE};
   bool calibration_requested_{false};
+  bool recovering_{false};  // after a power cut: close, then go to recovery_position
   bool calibrated_{false};
   bool end_found_{false};
-  const char *calibration_result_{"Not calibrated"};
+  bool alert_{false};
+  const char *calibration_result_{nullptr};
   const char *status_{nullptr};
   uint32_t settle_start_ms_{0};
   float homing_speed_{0};  // steps/s
@@ -187,6 +239,23 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   uint32_t sg_sum_{0};
   float sg_baseline_{0};
   uint16_t sg_min_{0};
+  uint16_t sg_last_{0};
+
+  // Encoder.
+  bool encoder_ok_{false};    // readable, magnet present, following the motor
+  int8_t encoder_sign_{0};    // +1 or -1: encoder direction relative to steps; 0 = not learned yet
+  uint16_t encoder_angle_{0};  // last raw reading
+  int32_t encoder_counts_{0};  // accumulated since boot, raw direction
+  int32_t encoder_offset_{0};  // position_ - encoder_steps_() when last synced
+  uint32_t last_encoder_read_us_{0};
+  uint8_t encoder_failures_{0};
+  bool encoder_warned_{false};
+  uint8_t lag_samples_{0};
+  int32_t lag_sum_{0};
+  int32_t lag_baseline_{0};
+  int32_t lag_max_{0};
+  bool turned_by_hand_{false};
+  uint32_t last_hand_turn_ms_{0};
 };
 
 }  // namespace esphome::valve_actuator

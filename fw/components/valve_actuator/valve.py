@@ -2,7 +2,7 @@ import math
 
 from esphome import pins
 import esphome.codegen as cg
-from esphome.components import binary_sensor, sensor, text_sensor, uart, valve
+from esphome.components import binary_sensor, sensor, spi, text_sensor, uart, valve
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_ACCELERATION,
@@ -10,11 +10,13 @@ from esphome.const import (
     CONF_CURRENT,
     CONF_DIR_PIN,
     CONF_ENABLE_PIN,
+    CONF_ID,
     CONF_MAX_SPEED,
     CONF_ON_BOOT,
     CONF_SPEED,
     CONF_STATUS,
     CONF_STEP_PIN,
+    DEVICE_CLASS_PROBLEM,
     ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
     UNIT_DEGREES,
@@ -28,6 +30,7 @@ AUTO_LOAD = ["binary_sensor", "sensor", "text_sensor"]
 ValveActuator = valve_actuator_ns.class_(
     "ValveActuator", valve.Valve, cg.Component, uart.UARTDevice
 )
+MT6816 = valve_actuator_ns.class_("MT6816", spi.SPIDevice)
 
 CONF_CLK_PIN = "clk_pin"
 CONF_SPREAD_PIN = "spread_pin"
@@ -49,6 +52,9 @@ CONF_MAX_TRAVEL = "max_travel"
 CONF_BACKOFF = "backoff"
 CONF_STALLGUARD = "stallguard"
 CONF_MEASURED_TRAVEL = "measured_travel"
+CONF_RECOVERY_POSITION = "recovery_position"
+CONF_ENCODER = "encoder"
+CONF_ALERT = "alert"
 
 
 def _max_current(sense_resistor):
@@ -92,7 +98,14 @@ HOMING_SCHEMA = cv.Schema(
         ),
         # Move this far off the closed end stop after finding it.
         cv.Optional(CONF_BACKOFF, default="5°"): cv.All(cv.angle, cv.Range(min=0.0)),
+        # Where to go after finding the closed end following a power cut.
+        cv.Optional(CONF_RECOVERY_POSITION, default="5%"): cv.percentage,
     }
+)
+
+# The MT6816 angle sensor under the motor's back shaft end.
+ENCODER_SCHEMA = cv.Schema({cv.GenerateID(): cv.declare_id(MT6816)}).extend(
+    spi.spi_device_schema(cs_pin_required=True)
 )
 
 
@@ -145,6 +158,11 @@ CONFIG_SCHEMA = cv.All(
                 accuracy_decimals=0,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
                 icon="mdi:rotate-right",
+            ),
+            cv.Optional(CONF_ENCODER): ENCODER_SCHEMA,
+            cv.Optional(CONF_ALERT): binary_sensor.binary_sensor_schema(
+                device_class=DEVICE_CLASS_PROBLEM,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
             cv.Optional(CONF_STATUS): text_sensor.text_sensor_schema(
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -207,6 +225,12 @@ async def to_code(config):
         cg.add(var.set_stall_threshold(homing[CONF_STALL_THRESHOLD]))
         cg.add(var.set_max_travel(homing[CONF_MAX_TRAVEL]))
         cg.add(var.set_backoff(homing[CONF_BACKOFF]))
+        cg.add(var.set_recovery_position(homing[CONF_RECOVERY_POSITION]))
+
+    if encoder_config := config.get(CONF_ENCODER):
+        encoder = cg.new_Pvariable(encoder_config[CONF_ID])
+        await spi.register_spi_device(encoder, encoder_config)
+        cg.add(var.set_encoder(encoder))
 
     if CONF_STALLGUARD in config:
         sens = await sensor.new_sensor(config[CONF_STALLGUARD])
@@ -217,3 +241,6 @@ async def to_code(config):
     if CONF_STATUS in config:
         sens = await text_sensor.new_text_sensor(config[CONF_STATUS])
         cg.add(var.set_status_sensor(sens))
+    if CONF_ALERT in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_ALERT])
+        cg.add(var.set_alert_sensor(sens))
