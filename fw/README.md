@@ -19,18 +19,18 @@ branch.
 ```sh
 cd fw
 cp secrets.yaml.example secrets.yaml   # then fill it in
-esphome run thermostat.yaml --device /dev/ttyACM0   # first flash, over the downloader
-esphome run thermostat.yaml                        # later, over Wi-Fi
+esphome run thermostat.yaml --device /dev/ttyACM0 --upload_speed 115200  # first flash, over the downloader
+esphome run thermostat.yaml --device thermostat.local                    # later, over Wi-Fi
 ```
 
 The first flash needs the downloader's EN and G0 wired to the board, or hold
-BOOT, tap RESET, release BOOT.
+BOOT, tap RESET, release BOOT. 460800 baud drops the link on this board.
 
 The TMC2209 only answers once the 9 to 12 V motor supply is on. Until then the
 valve ignores commands and the log says so; the driver is picked up when it
 appears.
 
-Watch the log with `esphome logs thermostat.yaml`.
+Watch the log with `esphome logs thermostat.yaml --device thermostat.local`.
 
 ## Home Assistant
 
@@ -39,43 +39,111 @@ discovered on its own) and paste `api_encryption_key` from `secrets.yaml` when
 asked. It shows up as:
 
 - **Radiator valve**: a valve with a position, 0 % closed to 100 % open.
-- **Calibrate valve**: finds the end stops again.
-- **Stall threshold** and **Calibration speed**: tuning, see below.
+- **Calibrate valve**: finds the closed end again by driving into it.
+- **Set closed here**, **Set open here**: the valve is at that end right now
+  (after turning it there by hand or with the jog buttons).
+- **Jog open 10°**, **Jog closed 10°**: move a little, ignoring the 0 to 100 %
+  range.
+- **Valve needs attention**: raised after the valve recovered from a power cut.
+  **Dismiss alert** clears it, and so does a calibration.
+- **Stall threshold**, **Calibration speed**, **Calibration current**: tuning,
+  see below.
 - **StallGuard**, **Valve travel**, **Valve status**: diagnostics.
 - **Restart**.
 
+The board's three buttons move the valve to 0, 50 and 100 %.
+
+## Position and the encoder
+
+The T-Motor has an MT6816 magnetic encoder under the motor, reading a magnet on
+the back of the motor shaft. The firmware reads it all the time:
+
+- **Turning by hand.** With the motor unpowered between moves, the valve can be
+  turned by hand. The position follows, and is published and saved once it has
+  been still for 2 s.
+- **Lost steps.** After each move the step count is checked against the
+  encoder and corrected if they disagree by more than 4 full steps.
+- **Stall detection.** While searching for an end stop, the motor falling
+  behind its steps by 3 full steps counts as a stall.
+
+The encoder only sees the motor. If a gear slips on its shaft, the motor keeps
+turning and the encoder can't tell.
+
+The encoder's direction relative to the motor is learned on the first move of
+at least 1/16 motor turn (a jog does it), then saved. Until then hand turns
+aren't tracked. If the encoder doesn't follow the motor at all, or reports no
+magnet, it's switched off and the log says so; everything else still works
+on step counting.
+
+## First-time setup
+
+1. Press **Jog open 10°** once so the encoder learns its direction.
+2. Turn the valve by hand (or jog it) to fully closed and press
+   **Set closed here**.
+3. Turn it to fully open and press **Set open here**. That saves the travel,
+   which then wins over `travel` in the YAML.
+
+That's enough to run without ever driving into an end stop. **Calibrate valve**
+and the power-cut recovery below find the closed end by stall detection, which
+needs tuning first.
+
 ## Calibration
 
-There are no limit switches. At boot, and when **Calibrate valve** is pressed,
-the valve:
+When **Calibrate valve** is pressed, the valve:
 
-1. switches the driver to StealthChop, the only mode with stall detection;
-2. moves 15° open first if it thinks it's near the closed end, so it has room
-   to get up to speed;
-3. turns towards closed until it stalls, and calls that 0 %;
-4. backs off 5°, then turns towards open until it stalls again and saves the
-   distance as the valve travel (skipped when `travel` is set in the YAML);
-5. goes back to SpreadCycle and moves to the position it was asked for.
+1. powers the motor at standstill for a moment so StealthChop can tune itself;
+2. moves 15° open first if it's near the closed end, so it has room to get up
+   to speed;
+3. turns towards closed at the calibration speed and current until it stalls,
+   and calls that 0 %;
+4. backs off 5°, and if the travel isn't known yet (no **Set open here**, no
+   `travel` in the YAML), turns towards open until it stalls again and saves
+   the distance as the travel;
+5. moves back to the position it was asked for.
 
-Stall detection reads the driver's StallGuard value, which drops as the load
-rises. The value while turning freely is measured first, and a stall is three
-readings in a row below `stall_threshold` of it. If no stall shows up within
-`max_travel`, the valve assumes it has run into the closed end anyway (the
-motor slips at the stop) and **Valve status** says so. Pressing stop on the
+A stall is either the motor falling behind (encoder) or the driver's
+StallGuard load reading dropping three times in a row below **Stall
+threshold** of its free-running value. If the valve was already calibrated and
+the "end" turns up more than 20° from the old zero, that's treated as a stall
+on friction: the old zero is kept and **Valve status** says "Stalled before the
+end". If nothing stalls within `max_travel`, the valve assumes it ran into the
+closed end anyway and says "Ready, end not detected". Pressing stop on the
 valve cancels a calibration.
 
-**Tuning on a new valve.** Press **Calibrate valve** and watch **StallGuard**
-and the log. You want a clearly higher value while turning freely than at the
-stops.
+With these gears the stall has to happen in the motor, before the gear slips
+on its shaft: StallGuard doesn't change while the gear slips (measured
+2026-11-19), and neither does the encoder. So the calibration runs at a lower
+current than normal moves.
 
-- Stops too early (on friction mid-travel): lower **Stall threshold**.
-- Grinds at the end stop: raise **Stall threshold**.
-- StallGuard near 0 even when turning freely: raise **Calibration speed** or
-  lower `homing: current`. StallGuard gets unreliable at low motor speeds.
+**Tuning the calibration current.** Press **Calibrate valve** and watch the log
+and **Valve status**:
 
-The sliders take effect at the next calibration and survive reboots. They take
-over from `speed` and `stall_threshold` in the YAML's `homing:` block, and start
-at the same values.
+- "End found at ... (motor stalled)" close to 0°: good.
+- "Stalled before the end": the motor can't turn the valve at this current.
+  Raise **Calibration current** a step.
+- "Ready, end not detected", with the gear slipping at the stop: the motor is
+  stronger than the gear's grip. Lower **Calibration current** a step.
+
+**Stall threshold** only matters for StallGuard. If StallGuard trips mid-travel,
+lower it. The sliders take effect at the next calibration and survive reboots;
+they take over from `speed`, `current` and `stall_threshold` in the YAML's
+`homing:` block and start at the same values.
+
+## Power cuts
+
+The position is saved after every move and hand turn, with the encoder angle
+at that moment. At boot:
+
+- If the encoder reads within ~5° (motor) of the saved angle, the saved
+  position is kept. The encoder only knows the angle within one motor turn, so
+  a hand turn of almost exactly whole motor turns while the power was off would
+  go unnoticed.
+- Without a working encoder, the saved position is kept only after a software
+  restart (OTA, **Restart**), not after a power cut.
+- Otherwise the valve recovers: it drives closed for up to `max_travel`, calls
+  that 0 %, opens to `recovery_position` (5 %) so the radiator can't freeze,
+  and raises **Valve needs attention**. Set the valve where you want it and
+  press **Dismiss alert**.
 
 ## Configuration
 
@@ -83,24 +151,27 @@ All motion settings are in valve degrees, after the gearbox:
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `travel` | measured | Valve rotation from closed to open. Leave out to have calibration measure it |
+| `travel` | measured | Valve rotation from closed to open. **Set open here** overrides it. Leave out to have calibration measure it |
 | `gear_ratio` | 1.0 | Motor turns per valve turn, e.g. 2.0 for a 1:2 reduction |
 | `run_current` | 1.0 A | RMS. Max ~1.64 A with the 120 mOhm sense resistors, but the driver overheats within seconds above ~1.2 A without a heatsink |
 | `hold_current` | 30% | Only matters with `hold_when_idle: true` |
 | `max_speed` | 90 | Valve °/s. Torque drops with speed |
 | `acceleration` | 180 | Valve °/s² |
 | `microsteps` | 16 | Interpolated to 256 by the driver |
-| `spread_cycle` | true | More torque under load; false = quieter StealthChop |
-| `hold_when_idle` | false | Off = motor unpowered between moves |
+| `spread_cycle` | true | More torque under load; false = quiet StealthChop (used here). Calibration always runs in StealthChop |
+| `hold_when_idle` | false | Off = motor unpowered between moves, so it can be turned by hand |
 | `invert_direction` | false | Flip if "open" turns the wrong way. Positive (open) is counter-clockwise on the current motor |
 | `address` | scan | TMC2209 UART address from the MS1/MS2 DIP switch (both off = 3) |
+| `encoder:` | none | MT6816 on an `spi:` bus: `spi_id` and `cs_pin` |
 | `open_limit`, `closed_limit` | none | Optional limit switches (binary sensors). Stop motion in that direction and count as an end stop during calibration |
-| `homing:` `on_boot` | true | Calibrate at boot |
+| `homing:` `on_boot` | true | Recover the position at boot when it can't be trusted |
 | `homing:` `speed` | 45 | Valve °/s while searching |
-| `homing:` `current` | `run_current` | RMS, during calibration |
-| `homing:` `stall_threshold` | 50% | Stall = StallGuard below this share of its free-running value |
+| `homing:` `current` | `run_current` | RMS, while searching |
+| `homing:` `stall_threshold` | 50% | StallGuard stall = below this share of its free-running value |
 | `homing:` `max_travel` | 1080° | How far to search for an end stop before giving up |
 | `homing:` `backoff` | 5° | Move off the closed stop after finding it |
+| `homing:` `recovery_position` | 5% | Where to go after recovering from a power cut |
+| `alert` | none | Binary sensor raised after a power-cut recovery |
 | `stallguard`, `measured_travel`, `status` | none | Diagnostic sensors |
 
 ## Board notes
@@ -110,6 +181,10 @@ All motion settings are in valve degrees, after the gearbox:
 - The VREF trimmer is ignored; current is set over UART only.
 - DIAG only drives an LED and doesn't reach the ESP32, so stall detection polls
   `SG_RESULT` over UART while the motor steps, without blocking the step timing.
+  StallGuard only works in StealthChop.
+- The encoder is on SPI: CLK GPIO14, MOSI GPIO13, MISO GPIO12, CS GPIO15. GPIO12
+  and GPIO15 are strapping pins. That's LilyGO's own wiring and the board boots
+  normally with it, so the YAML silences ESPHome's warning.
 - Limit switches were dropped for the second prototype. The component still
   takes them: P1 has GPIO33 and GPIO32 free (see `hw/limit-switches.md`),
   normally closed, so ON means at the limit or a broken wire.
@@ -118,5 +193,6 @@ All motion settings are in valve degrees, after the gearbox:
 
 ## Not done yet
 
-- Stall detection during normal moves (only calibration watches for stalls).
+- Stall detection during normal moves (only calibration and recovery watch for
+  stalls; normal moves only correct lost steps afterwards).
 - The thermostat loop and temperature sensor.

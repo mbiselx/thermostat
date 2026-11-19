@@ -48,6 +48,15 @@ uart:
   rx_pin: GPIO26
   baud_rate: 115200
 
+# MT6816 angle sensor under the motor's back shaft end (LilyGO pin map).
+spi:
+  id: encoder_spi
+  clk_pin: GPIO14
+  mosi_pin: GPIO13
+  miso_pin:
+    number: GPIO12
+    ignore_strapping_warning: true
+
 valve:
   - platform: valve_actuator
     id: radiator_valve
@@ -66,20 +75,33 @@ valve:
     hold_current: 30%
     microsteps: 16
     gear_ratio: 3.933   # motor turns per valve turn: the 59/15 herringbone gears
-    # travel: is measured by calibration. Set it here to skip finding the open end.
+    # Valve rotation from closed to open, a little short of the ~370° maximum so
+    # 100 % doesn't slip the gear. "Set open here" replaces it.
+    travel: 360°
     max_speed: 90       # valve degrees per second
     acceleration: 180   # valve degrees per second squared
-    spread_cycle: true  # more torque than StealthChop under load (calibration always uses StealthChop)
+    spread_cycle: false # StealthChop: quiet enough for a bedroom
     hold_when_idle: false  # the valve's friction holds it; keeps the driver cool
-    # Find the end stops by stalling into them, at boot and on the Calibrate
-    # button. The Stall threshold and Calibration speed sliders below take over
-    # speed and stall_threshold at runtime; they start at the same values.
+    encoder:
+      spi_id: encoder_spi
+      cs_pin:
+        number: GPIO15
+        ignore_strapping_warning: true
+    # Find the closed end by driving into it: on the Calibrate button, and at
+    # boot when the position can't be trusted (a power cut while the valve was
+    # moving, or it turned while off). The motor stalling (encoder) or the load
+    # rising (StallGuard) ends the search early. The sliders below take over
+    # speed, current and stall_threshold at runtime.
     homing:
       on_boot: true
       speed: 45             # valve degrees per second while searching
-      stall_threshold: 50%  # stall = StallGuard below this share of its free-running value
-      max_travel: 480°      # give up searching after this much rotation (travel is ~375°)
+      current: 0.6 A        # low enough that the motor stalls before the gear slips
+      stall_threshold: 50%  # StallGuard below this share of its free-running value
+      max_travel: 380°      # give up searching after this much rotation (travel is <= 370°)
       backoff: 5°           # move off the closed end stop after finding it
+      recovery_position: 5% # where to go after recovering from a power cut
+    alert:
+      name: Valve needs attention
     stallguard:
       name: StallGuard
     measured_travel:
@@ -94,6 +116,36 @@ button:
     entity_category: config
     on_press:
       - lambda: id(radiator_valve).calibrate();
+  - platform: template
+    name: Set closed here
+    icon: mdi:valve-closed
+    entity_category: config
+    on_press:
+      - lambda: id(radiator_valve).set_closed_here();
+  - platform: template
+    name: Set open here
+    icon: mdi:valve-open
+    entity_category: config
+    on_press:
+      - lambda: id(radiator_valve).set_open_here();
+  - platform: template
+    name: Jog open 10°
+    icon: mdi:rotate-left
+    entity_category: config
+    on_press:
+      - lambda: id(radiator_valve).jog(10);
+  - platform: template
+    name: Jog closed 10°
+    icon: mdi:rotate-right
+    entity_category: config
+    on_press:
+      - lambda: id(radiator_valve).jog(-10);
+  - platform: template
+    name: Dismiss alert
+    icon: mdi:bell-check
+    entity_category: config
+    on_press:
+      - lambda: id(radiator_valve).dismiss_alert();
   - platform: restart
     name: Restart
     entity_category: config
@@ -126,6 +178,19 @@ number:
     restore_value: true
     on_value:
       - lambda: id(radiator_valve).set_homing_speed(x);
+  - platform: template
+    name: Calibration current
+    icon: mdi:current-ac
+    entity_category: config
+    unit_of_measurement: A
+    min_value: 0.1
+    max_value: 1.2
+    step: 0.05
+    initial_value: 0.6
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(radiator_valve).set_homing_current(x);
 
 binary_sensor:
   # Board buttons (external pull-ups, pressed = low): close, half, open.
