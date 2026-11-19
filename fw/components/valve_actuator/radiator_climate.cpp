@@ -53,10 +53,16 @@ void RadiatorClimate::setup() {
   if (restore.has_value()) {
     restore->to_call(this).perform();
   } else {
+    // First boot: heat, at the Home preset if there is one.
     this->mode = climate::CLIMATE_MODE_HEAT;
     this->target_temperature = this->default_target_;
-    if (!this->presets_.empty())
+    const Preset *home = this->find_preset_(climate::CLIMATE_PRESET_HOME);
+    if (home != nullptr) {
+      this->set_preset_(climate::CLIMATE_PRESET_HOME);
+      this->target_temperature = home->target;
+    } else if (!this->presets_.empty()) {
       this->set_preset_(climate::CLIMATE_PRESET_NONE);
+    }
     this->publish_state();
   }
   this->restoring_ = false;
