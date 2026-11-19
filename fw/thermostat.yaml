@@ -4,6 +4,11 @@
 substitutions:
   name: thermostat
   friendly_name: Thermostat
+  # Room temperature for the thermostat, from Home Assistant. Any temperature
+  # sensor there works (a BLE meter, or a helper combining several): put its
+  # entity ID here and reflash.
+  room_temperature_sensor: sensor.room_hub3_a50e_temperature
+  room_humidity_sensor: sensor.room_hub3_a50e_humidity
 
 esphome:
   name: ${name}
@@ -151,7 +156,72 @@ button:
     entity_category: config
 
 # Calibration tuning from Home Assistant, kept across reboots.
+sensor:
+  - platform: homeassistant
+    id: room_temperature
+    entity_id: ${room_temperature_sensor}
+    internal: true
+  - platform: homeassistant
+    id: room_humidity
+    entity_id: ${room_humidity_sensor}
+    internal: true
+
+# Sets the valve from the room temperature. Moving the valve directly (Home
+# Assistant, the board buttons, an automation) holds it there until the
+# thermostat's mode, target or preset changes.
+climate:
+  - platform: valve_actuator
+    id: radiator_thermostat
+    name: Radiator
+    valve_id: radiator_valve
+    sensor: room_temperature
+    humidity_sensor: room_humidity
+    default_target_temperature: 21°C
+    presets:
+      home:
+        target_temperature: 23.5°C
+      sleep:
+        target_temperature: 20.5°C
+        valve_position: 25%   # what holds 20-21 °C overnight
+      away:
+        target_temperature: 18.5°C
+        valve_position: 5%
+    control:
+      kp: 20%          # valve opening per degree below target (also a slider)
+      ki: 5%           # added per degree-hour below target (also a slider)
+      deadband: 0.2    # no integral change this close to the target
+      min_step: 5%     # smaller changes don't move the valve
+    update_interval: 60s
+    valve_held:
+      name: Valve held by hand
+
 number:
+  - platform: template
+    name: Thermostat P gain
+    icon: mdi:tune-variant
+    entity_category: config
+    unit_of_measurement: "%/°C"
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 20
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(radiator_thermostat).set_kp(x / 100.0f);
+  - platform: template
+    name: Thermostat I gain
+    icon: mdi:tune-variant
+    entity_category: config
+    unit_of_measurement: "%/°C·h"
+    min_value: 0
+    max_value: 50
+    step: 1
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(radiator_thermostat).set_ki(x / 100.0f);
   - platform: template
     name: Stall threshold
     icon: mdi:car-brake-alert

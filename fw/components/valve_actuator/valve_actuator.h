@@ -88,6 +88,17 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   void dismiss_alert();
   bool is_calibrated() const { return this->calibrated_; }
 
+  // For the climate controller: move without counting as a manual command.
+  void move_to_fraction(float fraction);
+  // Where the valve is headed (0 = closed, 1 = open), including a position
+  // it will go to once a calibration finishes.
+  float target_fraction() const;
+  // Called when someone moves the valve directly (Home Assistant, the board
+  // buttons, an automation, jog), so the climate controller can step back.
+  template<typename F> void add_on_manual_move_callback(F &&callback) {
+    this->manual_move_callbacks_.add(std::forward<F>(callback));
+  }
+
  protected:
   enum class Homing : uint8_t {
     IDLE,
@@ -256,6 +267,8 @@ class ValveActuator : public valve::Valve, public Component, public uart::UARTDe
   int32_t lag_max_{0};
   bool turned_by_hand_{false};
   uint32_t last_hand_turn_ms_{0};
+
+  CallbackManager<void()> manual_move_callbacks_;
 };
 
 }  // namespace esphome::valve_actuator
