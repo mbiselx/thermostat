@@ -1,5 +1,13 @@
 # Limit switches
 
+> **Not used.** Limit switches were dropped for the second prototype
+> (2026-11-14). The firmware finds the closed end by stalling the motor at a
+> low current and seeing it with the encoder instead; see
+> [`../docs/design-decisions.md`](../docs/design-decisions.md#finding-the-end-stops).
+> The firmware still accepts switches (`open_limit`, `closed_limit`), so this
+> note is kept for anyone who wants to add them back. The P1 pinout below is
+> also the reference for powering the board.
+
 The valve actuator uses up to two limit switches wired to the spare inputs on the
 T-Motor's 6-pin power connector (P1). No extra components are needed.
 
