@@ -1,8 +1,11 @@
+import re
+
 import esphome.codegen as cg
-from esphome.components import binary_sensor, climate, sensor
+from esphome.components import binary_sensor, climate, sensor, text
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_HUMIDITY_SENSOR,
+    CONF_INITIAL_VALUE,
     CONF_SENSOR,
     CONF_TARGET_TEMPERATURE,
 )
@@ -10,7 +13,7 @@ from esphome.const import (
 from . import valve_actuator_ns
 from .valve import ValveActuator
 
-AUTO_LOAD = ["binary_sensor", "sensor"]
+AUTO_LOAD = ["binary_sensor", "sensor", "text"]
 
 CONF_VALVE_ID = "valve_id"
 CONF_DEFAULT_TARGET_TEMPERATURE = "default_target_temperature"
@@ -23,9 +26,44 @@ CONF_DEADBAND = "deadband"
 CONF_MIN_STEP = "min_step"
 CONF_MAX_POSITION = "max_position"
 CONF_VALVE_HELD = "valve_held"
+CONF_TEMPERATURE_ENTITY = "temperature_entity"
+
+ENTITY_ID_PATTERN = r"^$|^sensor\.[a-z0-9_]+$"
+TEXT_MAX_LENGTH = 100
 
 RadiatorClimate = valve_actuator_ns.class_(
     "RadiatorClimate", climate.Climate, cg.PollingComponent
+)
+TemperatureEntityText = valve_actuator_ns.class_(
+    "TemperatureEntityText", text.Text, cg.Component
+)
+
+
+def sensor_entity_id(value):
+    value = cv.string_strict(value).strip()
+    if not re.fullmatch(ENTITY_ID_PATTERN, value):
+        raise cv.Invalid(
+            f"'{value}' isn't a sensor entity ID like sensor.room_temperature"
+        )
+    return value
+
+
+# A text entity in Home Assistant holding the entity ID of the sensor to take
+# the temperature from. initial_value is used until someone changes it.
+TEMPERATURE_ENTITY_SCHEMA = cv.All(
+    text.text_schema(
+        TemperatureEntityText,
+        entity_category="config",
+        icon="mdi:thermometer",
+        mode="TEXT",
+    )
+    .extend(
+        {
+            cv.Optional(CONF_INITIAL_VALUE, default=""): sensor_entity_id,
+        }
+    )
+    .extend(cv.COMPONENT_SCHEMA),
+    cv.requires_component("api"),
 )
 
 PRESETS = {
@@ -44,6 +82,8 @@ PRESET_SCHEMA = cv.Schema(
         # Where the valve usually sits at this temperature: the starting point
         # when the preset is chosen.
         cv.Optional(CONF_VALVE_POSITION): cv.percentage,
+        # A different sensor for this preset; empty = the main one.
+        cv.Optional(CONF_TEMPERATURE_ENTITY): TEMPERATURE_ENTITY_SCHEMA,
     }
 )
 
@@ -61,12 +101,15 @@ CONTROL_SCHEMA = cv.Schema(
     }
 )
 
-CONFIG_SCHEMA = (
+CONFIG_SCHEMA = cv.All(
     climate.climate_schema(RadiatorClimate)
     .extend(
         {
             cv.GenerateID(CONF_VALVE_ID): cv.use_id(ValveActuator),
-            cv.Required(CONF_SENSOR): cv.use_id(sensor.Sensor),
+            # Home Assistant sensor to follow, chosen in Home Assistant.
+            cv.Optional(CONF_TEMPERATURE_ENTITY): TEMPERATURE_ENTITY_SCHEMA,
+            # A sensor on the device, used when no Home Assistant one is chosen.
+            cv.Optional(CONF_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_HUMIDITY_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_DEFAULT_TARGET_TEMPERATURE, default=21.0): cv.temperature,
             cv.Optional(CONF_PRESETS, default={}): cv.Schema(
@@ -78,8 +121,19 @@ CONFIG_SCHEMA = (
             ),
         }
     )
-    .extend(cv.polling_component_schema("60s"))
+    .extend(cv.polling_component_schema("60s")),
+    cv.has_at_least_one_key(CONF_TEMPERATURE_ENTITY, CONF_SENSOR),
 )
+
+
+async def temperature_entity_text(config, thermostat, *preset):
+    var = await text.new_text(
+        config, min_length=0, max_length=TEXT_MAX_LENGTH, pattern=ENTITY_ID_PATTERN
+    )
+    await cg.register_component(var, config)
+    cg.add(var.set_initial_value(config[CONF_INITIAL_VALUE]))
+    cg.add(var.set_thermostat(thermostat, *preset))
+    cg.add_define("USE_API_HOMEASSISTANT_STATES")
 
 
 async def to_code(config):
@@ -88,7 +142,10 @@ async def to_code(config):
 
     valve = await cg.get_variable(config[CONF_VALVE_ID])
     cg.add(var.set_valve(valve))
-    cg.add(var.set_sensor(await cg.get_variable(config[CONF_SENSOR])))
+    if CONF_SENSOR in config:
+        cg.add(var.set_sensor(await cg.get_variable(config[CONF_SENSOR])))
+    if CONF_TEMPERATURE_ENTITY in config:
+        await temperature_entity_text(config[CONF_TEMPERATURE_ENTITY], var)
     if CONF_HUMIDITY_SENSOR in config:
         cg.add(
             var.set_humidity_sensor(await cg.get_variable(config[CONF_HUMIDITY_SENSOR]))
@@ -103,6 +160,10 @@ async def to_code(config):
                 preset.get(CONF_VALVE_POSITION, cg.RawExpression("NAN")),
             )
         )
+        if CONF_TEMPERATURE_ENTITY in preset:
+            await temperature_entity_text(
+                preset[CONF_TEMPERATURE_ENTITY], var, PRESETS[name]
+            )
 
     control = config[CONF_CONTROL]
     cg.add(var.set_kp(control[CONF_KP]))

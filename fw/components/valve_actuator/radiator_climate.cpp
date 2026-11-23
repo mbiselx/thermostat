@@ -10,6 +10,10 @@
 
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
+#ifdef USE_API_HOMEASSISTANT_STATES
+#include "esphome/components/api/api_connection.h"
+#include "esphome/components/api/api_pb2.h"
+#endif
 #endif
 
 namespace esphome::valve_actuator {
@@ -28,16 +32,17 @@ void RadiatorClimate::setup() {
     this->integral_ = this->saved_integral_ = std::clamp(saved, 0.0f, this->max_position_);
   }
 
-  this->sensor_->add_on_state_callback([this](float state) {
-    bool first = std::isnan(this->current_temperature) && !std::isnan(state);
-    this->current_temperature = state;
-    if (first) {
-      this->update();  // react to the first reading instead of waiting
-    } else {
-      this->publish_state();
-    }
-  });
-  this->current_temperature = this->sensor_->state;
+  if (this->sensor_ != nullptr) {
+    this->sensor_->add_on_state_callback([this](float) {
+      if (this->active_entity_().empty())
+        this->source_changed_();
+    });
+  }
+  // Entities chosen before setup (text entities restore first) get subscribed
+  // here, before Home Assistant connects.
+  this->subscribe_(this->entity_id_);
+  for (const auto &entry : this->presets_)
+    this->subscribe_(entry.entity_id);
   if (this->humidity_sensor_ != nullptr) {
     this->humidity_sensor_->add_on_state_callback([this](float state) {
       this->current_humidity = state;
@@ -66,8 +71,123 @@ void RadiatorClimate::setup() {
     this->publish_state();
   }
   this->restoring_ = false;
+  this->refresh_temperature_();
   if (this->held_sensor_ != nullptr)
     this->held_sensor_->publish_state(false);
+  this->setup_done_ = true;
+}
+
+// --- Temperature source --------------------------------------------------------
+
+void RadiatorClimate::set_temperature_entity(const std::string &entity_id) {
+  if (entity_id == this->entity_id_)
+    return;
+  this->entity_id_ = entity_id;
+  if (this->setup_done_) {
+    ESP_LOGI(TAG, "Temperature sensor: %s", entity_id.empty() ? "none" : entity_id.c_str());
+    this->subscribe_(entity_id);
+    this->source_changed_();
+  }
+}
+
+void RadiatorClimate::set_preset_temperature_entity(climate::ClimatePreset preset, const std::string &entity_id) {
+  for (auto &entry : this->presets_) {
+    if (entry.preset != preset)
+      continue;
+    if (entry.entity_id == entity_id)
+      return;
+    entry.entity_id = entity_id;
+    if (this->setup_done_) {
+      ESP_LOGI(TAG, "Temperature sensor for %s: %s", LOG_STR_ARG(climate::climate_preset_to_string(preset)),
+               entity_id.empty() ? "the main one" : entity_id.c_str());
+      this->subscribe_(entity_id);
+      this->source_changed_();
+    }
+    return;
+  }
+  ESP_LOGW(TAG, "No preset %s to give a temperature sensor", LOG_STR_ARG(climate::climate_preset_to_string(preset)));
+}
+
+// The current preset's sensor if it has one, else the main one ("" = none).
+const std::string &RadiatorClimate::active_entity_() const {
+  if (this->preset.has_value()) {
+    const Preset *entry = this->find_preset_(*this->preset);
+    if (entry != nullptr && !entry->entity_id.empty())
+      return entry->entity_id;
+  }
+  return this->entity_id_;
+}
+
+// Subscriptions can't be dropped, so every entity ever chosen stays subscribed
+// until the next reboot; only the active one is used.
+void RadiatorClimate::subscribe_(const std::string &entity_id) {
+  if (entity_id.empty())
+    return;
+  for (const auto &sub : this->subscriptions_) {
+    if (sub.entity_id == entity_id)
+      return;
+  }
+  size_t index = this->subscriptions_.size();
+  this->subscriptions_.push_back({entity_id, NAN});
+#ifdef USE_API_HOMEASSISTANT_STATES
+  api::global_api_server->subscribe_home_assistant_state(
+      entity_id, {}, [this, index](StringRef state) {
+        auto value = parse_number<float>(state.c_str());
+        if (!value.has_value()) {
+          ESP_LOGW(TAG, "'%s': Can't use '%s' as a temperature", this->subscriptions_[index].entity_id.c_str(),
+                   state.c_str());
+        }
+        this->on_entity_state_(index, value.value_or(NAN));
+      });
+  if (this->setup_done_) {
+    // Home Assistant asked for the subscriptions when it connected; tell it
+    // about this one now instead of at the next connection.
+    api::SubscribeHomeAssistantStateResponse request;
+    request.entity_id = StringRef(this->subscriptions_[index].entity_id);
+    request.attribute = StringRef("");
+    request.once = false;
+    for (const auto &client : api::global_api_server->active_clients()) {
+      if (!client->send_message(request)) {
+        ESP_LOGW(TAG, "Couldn't subscribe to %s yet; it will be at the next connection", entity_id.c_str());
+      }
+    }
+  }
+#else
+  ESP_LOGW(TAG, "Can't follow %s: no Home Assistant API", entity_id.c_str());
+#endif
+}
+
+void RadiatorClimate::on_entity_state_(size_t index, float value) {
+  this->subscriptions_[index].value = value;
+  if (this->subscriptions_[index].entity_id == this->active_entity_())
+    this->source_changed_();
+}
+
+// Takes the temperature from the active source. Returns whether that's the
+// first valid reading.
+bool RadiatorClimate::refresh_temperature_() {
+  const std::string &entity = this->active_entity_();
+  float temperature = NAN;
+  if (!entity.empty()) {
+    for (const auto &sub : this->subscriptions_) {
+      if (sub.entity_id == entity)
+        temperature = sub.value;
+    }
+  } else if (this->sensor_ != nullptr) {
+    temperature = this->sensor_->state;
+  }
+  bool first = std::isnan(this->current_temperature) && !std::isnan(temperature);
+  this->current_temperature = temperature;
+  return first;
+}
+
+void RadiatorClimate::source_changed_() {
+  bool first = this->refresh_temperature_();
+  if (first && this->setup_done_) {
+    this->update();  // react to the first reading instead of waiting
+  } else {
+    this->publish_state();
+  }
 }
 
 void RadiatorClimate::control(const climate::ClimateCall &call) {
@@ -101,6 +221,8 @@ void RadiatorClimate::control(const climate::ClimateCall &call) {
     this->publish_state();
     return;
   }
+  // The preset may come with its own sensor.
+  this->refresh_temperature_();
   // Any change to the thermostat takes the valve back from manual control.
   this->set_held_(false);
   if (this->mode == climate::CLIMATE_MODE_OFF)
@@ -245,14 +367,17 @@ void RadiatorClimate::dump_config() {
                 "  Deadband: %.1f deg, smallest valve move: %.0f%%, at most %.0f%% open",
                 this->kp_ * 100, this->ki_ * 100, this->get_update_interval() / 1000.0f, this->deadband_,
                 this->min_step_ * 100, this->max_position_ * 100);
+  ESP_LOGCONFIG(TAG, "  Temperature: %s", !this->entity_id_.empty() ? this->entity_id_.c_str()
+                                          : this->sensor_ != nullptr  ? "device sensor"
+                                                                      : "none");
   for (const auto &entry : this->presets_) {
-    if (std::isnan(entry.valve_position)) {
-      ESP_LOGCONFIG(TAG, "  Preset %s: %.1f deg", LOG_STR_ARG(climate::climate_preset_to_string(entry.preset)),
-                    entry.target);
-    } else {
-      ESP_LOGCONFIG(TAG, "  Preset %s: %.1f deg, valve starts at %.0f%%",
-                    LOG_STR_ARG(climate::climate_preset_to_string(entry.preset)), entry.target,
-                    entry.valve_position * 100);
+    ESP_LOGCONFIG(TAG, "  Preset %s: %.1f deg", LOG_STR_ARG(climate::climate_preset_to_string(entry.preset)),
+                  entry.target);
+    if (!std::isnan(entry.valve_position)) {
+      ESP_LOGCONFIG(TAG, "    Valve starts at %.0f%%", entry.valve_position * 100);
+    }
+    if (!entry.entity_id.empty()) {
+      ESP_LOGCONFIG(TAG, "    Temperature: %s", entry.entity_id.c_str());
     }
   }
   if (!std::isnan(this->integral_)) {
