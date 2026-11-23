@@ -40,8 +40,11 @@ Add the device under Settings > Devices & services > ESPHome (it is usually
 discovered on its own) and paste `api_encryption_key` from `secrets.yaml` when
 asked. It shows up as:
 
-- **Radiator**: the thermostat. Off or heat, a target temperature, and the
-  Home, Sleep and Away presets. See [Thermostat](#thermostat).
+- The thermostat, as the device's main entity (named after the device, e.g.
+  "Thermostat"). Off or heat, a target temperature, and the Home, Sleep and
+  Away presets. See [Thermostat](#thermostat).
+- **Temperature sensor**, **Sleep temperature sensor**, **Away temperature
+  sensor**: which Home Assistant sensor the thermostat follows.
 - **Valve held by hand**: on while a direct valve command holds off the
   thermostat.
 - **Thermostat P gain**, **Thermostat I gain**: tuning.
@@ -154,11 +157,26 @@ at that moment. At boot:
 
 ## Thermostat
 
-The climate platform sets the valve from the room temperature. It reads the
-temperature from a Home Assistant sensor, `room_temperature_sensor` at the top
-of `thermostat.yaml` (the Hub 3 in the room by default). Any temperature sensor
-in Home Assistant works, such as a Bluetooth meter or a "Combine the state of
-several sensors" helper averaging a few: put its entity ID there and reflash.
+The climate platform sets the valve from the room temperature. It's the
+device's main entity (`name: None`), so it takes the device's name and a
+second device, say a kitchen radiator with `friendly_name: Kitchen
+thermostat`, gets its own climate entity named after it.
+
+**Which sensor.** The temperature comes from a Home Assistant sensor, chosen on
+the device page in Home Assistant by typing its entity ID (for example
+`sensor.room_meter_bed_temperature`) into a text field:
+
+- **Temperature sensor**: used for Home, a temperature set by hand, and any
+  preset without its own sensor. Starts as the Hub 3 in the room.
+- **Sleep temperature sensor**: used in the Sleep preset. Starts as the meter
+  by the bed.
+- **Away temperature sensor**: used in the Away preset. Starts empty, which
+  means the main sensor.
+
+Any temperature sensor in Home Assistant works, such as a Bluetooth meter or a
+"Combine the state of several sensors" helper averaging a few. A change takes
+effect at once, without a restart, and is kept across reboots. The starting
+values are the substitutions at the top of `thermostat.yaml`.
 
 It's a PI controller, built to move the valve as little as possible:
 
@@ -227,10 +245,11 @@ The thermostat (`climate:` `platform: valve_actuator`):
 | Option | Default | Notes |
 | --- | --- | --- |
 | `valve_id` | the valve | |
-| `sensor` | required | Room temperature, usually a `homeassistant` sensor |
+| `temperature_entity` | none | A text entity (`name`, `initial_value`) holding the Home Assistant sensor to follow. Needs `api:` |
+| `sensor` | none | A sensor on the device, used when no Home Assistant sensor is chosen. One of the two is required |
 | `humidity_sensor` | none | Shown on the thermostat card |
 | `default_target_temperature` | 21 °C | On first boot when there is no `home` preset (otherwise it starts in Home) |
-| `presets:` `home`/`sleep`/`away`/`eco`/`comfort`/`boost`/`activity` | none | Each with `target_temperature` and optionally `valve_position`, where the valve usually holds it |
+| `presets:` `home`/`sleep`/`away`/`eco`/`comfort`/`boost`/`activity` | none | Each with `target_temperature`, optionally `valve_position` (where the valve usually holds it) and `temperature_entity` (a sensor just for this preset; empty = the main one) |
 | `control:` `kp` | 20% | Valve opening per degree below target |
 | `control:` `ki` | 5% | Integral growth per degree-hour below target |
 | `control:` `deadband` | 0.2 °C | No integral change this close to the target |

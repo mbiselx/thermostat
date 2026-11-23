@@ -4,10 +4,12 @@
 substitutions:
   name: thermostat
   friendly_name: Thermostat
-  # Room temperature for the thermostat, from Home Assistant. Any temperature
-  # sensor there works (a BLE meter, or a helper combining several): put its
-  # entity ID here and reflash.
+  # Home Assistant sensors the thermostat starts with. The temperature sensors
+  # can be changed later from Home Assistant (the "... temperature sensor" text
+  # entities on the device); these only apply until then.
   room_temperature_sensor: sensor.room_hub3_a50e_temperature
+  sleep_temperature_sensor: sensor.room_meter_bed_temperature
+  away_temperature_sensor: ""  # empty = the room sensor above
   room_humidity_sensor: sensor.room_hub3_a50e_humidity
 
 esphome:
@@ -158,10 +160,6 @@ button:
 # Calibration tuning from Home Assistant, kept across reboots.
 sensor:
   - platform: homeassistant
-    id: room_temperature
-    entity_id: ${room_temperature_sensor}
-    internal: true
-  - platform: homeassistant
     id: room_humidity
     entity_id: ${room_humidity_sensor}
     internal: true
@@ -172,9 +170,12 @@ sensor:
 climate:
   - platform: valve_actuator
     id: radiator_thermostat
-    name: Radiator
+    name: None  # the device's main entity, named after the device
     valve_id: radiator_valve
-    sensor: room_temperature
+    # Which Home Assistant sensor to follow, set from Home Assistant.
+    temperature_entity:
+      name: Temperature sensor
+      initial_value: ${room_temperature_sensor}
     humidity_sensor: room_humidity
     default_target_temperature: 21°C
     presets:
@@ -183,9 +184,15 @@ climate:
       sleep:
         target_temperature: 20.5°C
         valve_position: 25%   # what holds 20-21 °C overnight
+        temperature_entity:
+          name: Sleep temperature sensor
+          initial_value: ${sleep_temperature_sensor}
       away:
         target_temperature: 18.5°C
         valve_position: 5%
+        temperature_entity:
+          name: Away temperature sensor
+          initial_value: ${away_temperature_sensor}
     control:
       kp: 20%          # valve opening per degree below target (also a slider)
       ki: 5%           # added per degree-hour below target (also a slider)
