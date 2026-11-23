@@ -170,8 +170,8 @@ the device page in Home Assistant by typing its entity ID (for example
   preset without its own sensor. Starts as the Hub 3 in the room.
 - **Sleep temperature sensor**: used in the Sleep preset. Starts as the meter
   by the bed.
-- **Away temperature sensor**: used in the Away preset. Starts empty, which
-  means the main sensor.
+- **Away temperature sensor**: used in the Away preset. Starts as the meter
+  by the window (the coldest spot). Empty means the main sensor.
 
 Any temperature sensor in Home Assistant works, such as a Bluetooth meter or a
 "Combine the state of several sensors" helper averaging a few. A change takes
