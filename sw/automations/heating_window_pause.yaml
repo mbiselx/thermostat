@@ -1,0 +1,53 @@
+alias: Heating - pause while a window is open
+description: >-
+  Turns the radiator thermostat off while any studio window is open and turns
+  it back on when all windows are closed again. Replaces the version that set
+  the valve directly: with the thermostat in the firmware, a direct valve
+  command would hold the valve and keep the thermostat out until the next
+  scheduled change.
+mode: single
+max_exceeded: silent
+variables:
+  thermostat: climate.room_thermostat
+  windows:
+    - binary_sensor.room_large_window
+    - binary_sensor.room_small_window
+    - binary_sensor.kitchen_window
+triggers:
+  - trigger: state
+    entity_id:
+      - binary_sensor.room_large_window
+      - binary_sensor.room_small_window
+      - binary_sensor.kitchen_window
+    to: "on"
+    for: "00:00:15"
+conditions:
+  # Nothing to pause if the thermostat is already off.
+  - condition: template
+    value_template: "{{ not is_state(thermostat, 'off') }}"
+actions:
+  - variables:
+      mode_before: "{{ states(thermostat) }}"
+  # Off closes the valve. The firmware remembers it, so a power cut while the
+  # window is open doesn't reopen the valve.
+  - action: climate.turn_off
+    target:
+      entity_id: climate.room_thermostat
+  # Wait until every window is closed and still closed 30 s later (no timeout).
+  - repeat:
+      sequence:
+        - wait_template: "{{ windows | select('is_state', 'on') | list | count == 0 }}"
+        - delay: "00:00:30"
+      until:
+        - condition: template
+          value_template: "{{ windows | select('is_state', 'on') | list | count == 0 }}"
+  # Turn it back on only if nobody changed it in the meantime.
+  - if:
+      - condition: template
+        value_template: "{{ is_state(thermostat, 'off') }}"
+    then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: climate.room_thermostat
+        data:
+          hvac_mode: "{{ mode_before }}"

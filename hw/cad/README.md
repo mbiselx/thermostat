@@ -187,8 +187,11 @@ features. Then re-export:
    of the front half.
 8. **Grease the teeth** lightly with PTFE or silicone grease, then fit the
    **plexiglass window** over the front of the housing.
-9. **Wire it up and calibrate**: see [`../../fw/`](../../fw/). The firmware finds both
-   end stops by stall detection, so no limit switches are needed.
+9. **Wire it up, flash it and set the end stops**: see the
+   [top-level README](../../README.md#5-wire) and
+   [`../../fw/`](../../fw/README.md#first-time-setup). The end stops are set by
+   hand once, and the firmware finds the closed end again by stall detection
+   when it needs to, so no limit switches are needed.
 
 ## Known issues
 

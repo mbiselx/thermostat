@@ -13,10 +13,15 @@ presets) and as a valve with a position (0 % closed, 100 % open).
   remembers the position across reboots. Its climate platform is the
   thermostat.
 
-The PlatformIO bring-up and torque-test firmware lives on the `torque-test`
-branch.
+The PlatformIO bring-up and torque-test firmware lives on the
+`archive/torque-test` branch. Why the firmware works the way it does (no limit
+switches, encoder stall detection, StealthChop, the power-cut behaviour) is in
+[`docs/design-decisions.md`](../docs/design-decisions.md).
 
 ## Build and flash
+
+Needs ESPHome (`pip install esphome`); the config was last checked with
+2026.11.0.
 
 ```sh
 cd fw

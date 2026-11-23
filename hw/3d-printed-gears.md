@@ -1,5 +1,13 @@
 # 3D-printed gear reduction for the valve actuator
 
+> **Outcome.** This is the research from 2026-10-17, before the gears were
+> designed. What was built: a herringbone pair, 15:59 teeth (3.93:1), normal
+> module 1.25, 22.33° helix, 50 mm centres, 12 mm face, both gears printed in
+> PETG at 0.07 mm layers (finer than suggested below, and very quiet). Limit
+> switches, recommended below, were later dropped in favour of stall
+> detection. Gear data and print settings: [`cad/README.md`](cad/README.md);
+> reasons: [`../docs/design-decisions.md`](../docs/design-decisions.md#gear-reduction-2026-10-17).
+
 Goal: 1:2 minimum, ideally 1:3 to 1:4, silent, durable, compact, next to a hot radiator.
 Motor: SY42STH38-1684A (36 N·cm holding at 1.68 A; datasheet in `hw/datasheets/`).
 At the ~1.2 A the TMC2209 can sustain without a heatsink, expect roughly **0.2 N·m usable** at low speed.
