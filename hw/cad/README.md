@@ -13,7 +13,7 @@ specific valve (see [How it mounts on the valve](#how-it-mounts-on-the-valve)), 
 **print the fit tests on your own valve before printing the housing**.
 
 Background on why this gear pair was chosen: [`../3d-printed-gears.md`](../3d-printed-gears.md).
-Firmware and calibration: [`../../fw/`](../../fw/) (on the `esphome` branch until it's merged).
+Firmware and calibration: [`../../fw/`](../../fw/).
 
 ## Files
 
@@ -70,6 +70,7 @@ but you can't change their parameters.
 | M3 × 20 socket head screws | 3 | join the two halves |
 | M3 square nuts (DIN 562, 5.5 × 1.8 mm) | 3 | slide into the 2.0 × 5.8 mm slots in the back half |
 | Grub screw | 1 | holds the valve gear on the spindle (not modelled, see [Known issues](#known-issues)) |
+| Plexiglass (acrylic) window, about 118 × 90 × 5 mm | 1 | closes the front of the housing. Not modelled, and the size comes from an offcut, so measure your printed front half before cutting one |
 | PTFE or silicone grease | a little | for the gear teeth, plastic-safe |
 
 Screw counts and slot sizes are measured from the CAD. Lengths are estimates
@@ -100,18 +101,21 @@ from the hole depths, so check them against your hardware before ordering.
 
 ## Print settings
 
-These follow [`../3d-printed-gears.md`](../3d-printed-gears.md). The STLs are
+These follow [`../3d-printed-gears.md`](../3d-printed-gears.md), except the gear layer height, which comes from the working prototype. The STLs are
 already rotated to the orientation listed here.
 
 | | Gears | Housing |
 |---|---|---|
 | Material | PETG (nylon or ASA also fine) | PETG or ASA |
-| Layer height | 0.12 to 0.16 mm | 0.2 mm |
+| Layer height | 0.07 mm (what the working prototype uses) | 0.2 mm |
 | Walls | 4 to 6, or 100 % infill, so the teeth are solid | 3 to 4 |
 | Infill | 100 % (or enough walls to fill the teeth) | 20 to 30 % |
 | Orientation | flat, as exported | front: split face down. back: outer face down |
 | Supports | none needed | front: yes, under the motor plate and the valve bore. back: only small ones |
 
+- **Use fine layers for the gears.** The prototype's gears were printed at 0.07 mm
+  and run very quietly and smoothly. Coarser layers (0.12 to 0.16 mm) work but
+  will be noisier.
 - **Don't use PLA.** It softens around 55 to 60 °C and the valve body gets hotter than that.
 - For the gears, keep the Z seam off the tooth flanks and add a 0.4 to 0.5 mm
   elephant's-foot compensation (or chamfer), otherwise the bottom edge rubs.
@@ -181,7 +185,8 @@ features. Then re-export:
 7. **Close the back half** around the pipe. Slide the 3 square nuts into their
    slots in the back half and put the 3 M3 × 20 screws in from the open gear side
    of the front half.
-8. **Grease the teeth** lightly with PTFE or silicone grease.
+8. **Grease the teeth** lightly with PTFE or silicone grease, then fit the
+   **plexiglass window** over the front of the housing.
 9. **Wire it up and calibrate**: see [`../../fw/`](../../fw/). The firmware finds both
    end stops by stall detection, so no limit switches are needed.
 
@@ -195,8 +200,10 @@ features. Then re-export:
   flat on the spindle and adding a matching D-flat to the bore, or a lower motor
   current during calibration. The grub screw hole isn't in the CAD yet.
 - **The pinion has a plain 5.01 mm round bore**, with no D-flat or set screw.
-- **The gears are exposed.** The front of the housing is open, and the valve gear
-  sticks out about 11 mm past the side of the housing. There's no cover yet.
+- **The valve gear sticks out about 11 mm past the side of the housing, on
+  purpose.** It lets you turn the valve by hand during a power cut or a Wi-Fi
+  problem. The exposed teeth aren't child-safe, so keep that in mind where small
+  fingers can reach it.
 - `housing.FCStd` also contains the first housing (`housing_front`,
   `housing_back`) and a `window` reference body. Only `housing_front_2` and
   `housing_back_2` are current.
