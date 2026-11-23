@@ -15,7 +15,7 @@ To actuate one, I am goign to use a NEMA17 stepper motor, driven by a LillyGO TT
 thermostat/ 
 ├── fw/         # on-device firmware
 ├── hw/         # hardware related files 
-|  ├── cad/ 
+|  ├── cad/         # FreeCAD sources, STEP/STL exports, assembly notes
 |  ├── datasheets/ 
 |  ├── BOM.md
 |  ├── 3d-printed-gears.md  # gear reduction options and printing tips
