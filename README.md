@@ -7,7 +7,8 @@ I want to be able to control the temperature in my studio using home assistant. 
 
 ## The Plan
 The valve on my radiators are rotationally actuated, and require a fairly high torque (since they are pretty old).
-To actuate one, I am goign to use a NEMA17 stepper motor, driven by a LillyGO TTGO T-Motor ESP32 driver board.
+To actuate one, I am goign to use a NEMA17 stepper motor, driven by a LillyGO TTGO T-Motor ESP32 driver board. 
+The parts will be 3D-printed (at least for the first iterations), and for ease of integration into Home Assistant, I will use ESPHome for the firmware.
 
 ### Project Layout
 
