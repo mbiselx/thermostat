@@ -98,8 +98,9 @@ This went through three designs.
    plan, and what the gear research recommended: two microswitches on the
    output side, wired to P1's spare inputs
    ([`hw/limit-switches.md`](../hw/limit-switches.md)). They were dropped for
-   the second prototype in favour of stall detection, which needs no extra
-   parts, wiring or room in an already tight housing. The firmware still
+   the second prototype: integrating them into the housing proved too time
+   consuming, and stall detection solved the same problem with no extra parts
+   or wiring. The firmware still
    accepts them (`open_limit`, `closed_limit`).
 2. **StallGuard (2026-11-14).** Drive towards closed until the TMC2209's load
    reading drops below a share of its free-running value. This failed on the

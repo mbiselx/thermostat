@@ -103,7 +103,7 @@ There's very little wiring, because the driver and encoder are on the board:
 
 | From | To | Notes |
 | --- | --- | --- |
-| Motor's 4-wire cable | T-Motor motor connector | The board mounts on the back of the motor, with the MT6816 facing a magnet on the motor shaft's back end. If "open" turns the wrong way, set `invert_direction: true` in `fw/thermostat.yaml` |
+| Motor's 4-wire cable | T-Motor motor connector | The board mounts on the back of the motor, with the MT6816 facing a magnet on the motor shaft's back end. The magnet is just laid on the shaft end and held by its own pull. If "open" turns the wrong way, set `invert_direction: true` in `fw/thermostat.yaml` |
 | 12 V DC supply + | P1 pin 1 (V+) | 9 to 12 V. Feeds the motor and the board. The TMC2209 doesn't answer until this is on, so USB/serial power alone isn't enough to move anything |
 | 12 V DC supply − | P1 pin 2 (GND) | |
 | USB-to-serial downloader | the board's programming pins | First flash only; afterwards updates go over Wi-Fi. With EN and G0 wired, the downloader resets the board into the bootloader by itself |

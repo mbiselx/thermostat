@@ -8,7 +8,7 @@ from [`cad/README.md`](cad/README.md), which has the detail.
 | Item | Qty | Notes |
 | --- | --- | --- |
 | LilyGO TTGO T-Motor | 1 | ESP32 + TMC2209 + MT6816 encoder, mounts on the back of a NEMA17. This build is the **MOSFET** variant of the P1 inputs (three BSS123W next to P1); only matters if you add limit switches. [Board repo and schematic](https://github.com/Xinyuan-LilyGO/T-Motor) |
-| Magnet for the encoder | 1 | Diametrically magnetised, on the back end of the motor shaft, facing the MT6816. Without it the firmware still runs on step counting, but can't follow hand turns, see the motor stall during calibration, or check its position after a power cut |
+| Magnet for the encoder | 1 | Diametrically magnetised. It's simply laid on the back end of the motor shaft and held there by its own pull, under the MT6816; no glue. Without it the firmware still runs on step counting, but can't follow hand turns, see the motor stall during calibration, or check its position after a power cut |
 | NEMA17 stepper, SY42STH38-1684A | 1 | 1.8°, 1.68 A, 36 N·cm. [Datasheet](datasheets/SY42STH38-1684A.pdf). Run at 1.0 A (0.6 A while calibrating) |
 | 12 V DC power supply | 1 | 9 to 12 V into P1 pins 1 (V+) and 2 (GND) |
 | Cable or connector for P1 | 1 | JST 6-pin, 2 wires used |
